@@ -15,6 +15,115 @@ from backend.app.models import (
 from backend.app.content.eras import get_era
 
 
+TURN_OUTPUT_PROTOCOL = """输出必须严格遵守以下 JSON 协议：
+1. 整条回复只能包含一个 JSON 对象；不要输出 Markdown、代码围栏、解释、前言或结语。
+2. 所有键名和字符串必须使用双引号。禁止使用单引号、注释、尾随逗号、NaN 或 undefined。
+3. 必须输出合法 JSON 原生类型：数字不能写成字符串，布尔值只能是 true/false，空值只能是 null。
+4. 不得省略必填字段。没有内容时仍要按模板返回空数组 []、空对象 {} 或 null。
+5. response_type 只能是 "narrative" 或 "memory_request"，并且只能选择下面一个模板返回。
+6. 返回前在内部检查 JSON 可解析性、必填字段、字段类型和 choices 顺序；不要输出检查过程。
+7. NARRATIVE_JSON_TEMPLATE_BEGIN/END 和 MEMORY_REQUEST_JSON_TEMPLATE_BEGIN/END 只是模板边界标记，模板边界标记不得输出。
+
+正式剧情必须使用下面的完整形状。choices 至少包含两个 action，最后一个必须是 free_text：
+NARRATIVE_JSON_TEMPLATE_BEGIN
+{
+  "response_type": "narrative",
+  "turn": {
+    "title": "本回合标题",
+    "scene_type": "dialogue",
+    "narrative": "本回合完整剧情正文",
+    "location_id": null,
+    "time_advance_minutes": 0
+  },
+  "choices": [
+    {
+      "id": "choice_1",
+      "label": "第一个明确行动",
+      "kind": "action",
+      "risk": "low",
+      "requires": [],
+      "effects_hint": "",
+      "effects": {
+        "gains": [],
+        "losses": [],
+        "note": ""
+      }
+    },
+    {
+      "id": "choice_2",
+      "label": "第二个明确行动",
+      "kind": "action",
+      "risk": "medium",
+      "requires": [],
+      "effects_hint": "",
+      "effects": {
+        "gains": [],
+        "losses": [],
+        "note": ""
+      }
+    },
+    {
+      "id": "choice_other",
+      "label": "其他",
+      "kind": "free_text",
+      "risk": "unknown",
+      "requires": [],
+      "effects_hint": "",
+      "effects": {
+        "gains": [],
+        "losses": [],
+        "note": ""
+      }
+    }
+  ],
+  "state_proposals": {},
+  "player_changes": {
+    "inventory_add": [],
+    "inventory_remove": [],
+    "status_add": [],
+    "status_remove": [],
+    "skill_add": [],
+    "skill_remove": [],
+    "skill_deltas": {},
+    "trait_add": [],
+    "trait_remove": [],
+    "vital_deltas": {},
+    "attribute_deltas": {},
+    "reputation_deltas": {},
+    "relationship_deltas": []
+  },
+  "worldline": {
+    "offset_rate": 0,
+    "delta": 0,
+    "reason": "本回合世界线变化原因",
+    "affected_nodes": []
+  },
+  "events": [],
+  "memory_update": {
+    "summary": "本回合简短摘要",
+    "create_long_term_memory": false,
+    "memory": null,
+    "resolved_memory_ids": []
+  },
+  "self_check": {
+    "json_only": true,
+    "required_fields_present": true
+  }
+}
+NARRATIVE_JSON_TEMPLATE_END
+
+只有在现有上下文不足以确认旧事件时，才使用下面的记忆查阅形状；不要混入 narrative 字段：
+MEMORY_REQUEST_JSON_TEMPLATE_BEGIN
+{
+  "response_type": "memory_request",
+  "memory_request": {
+    "memory_ids": [],
+    "reason": "需要查阅这些记忆的原因"
+  }
+}
+MEMORY_REQUEST_JSON_TEMPLATE_END"""
+
+
 def build_turn_messages(
     *,
     game_session: GameSession,
@@ -49,6 +158,7 @@ polarity（positive 或 negative）以及获得原因 reason。
 relationship_deltas 中使用 npc_id、affinity_delta、trust_delta 和可选 stage。
 不要绕过年龄限制设置恋爱阶段。
 如果现有摘要不足以确认旧事件，先返回 memory_request；每个回合最多请求一次查阅。"""
+    system = f"{system}\n\n{TURN_OUTPUT_PROTOCOL}"
 
     era = get_era(game_session.era_id)
     context = {
@@ -134,4 +244,3 @@ def _memory_to_context(memory: LongTermMemory) -> dict[str, Any]:
         "open_threads": memory.open_threads,
         "source_turn_ids": memory.source_turn_ids,
     }
-

@@ -23,7 +23,7 @@ from backend.app.models import (
     TurnRecord,
 )
 from backend.app.providers.openai_compatible import OpenAICompatibleProvider
-from backend.app.prompts.turn import build_turn_messages
+from backend.app.prompts.turn import TURN_OUTPUT_PROTOCOL, build_turn_messages
 from backend.app.rules.state import apply_turn_rules
 from backend.app.schemas.game import (
     ActionRequest,
@@ -38,6 +38,14 @@ from backend.app.services.memory import get_memories_by_ids, recall_memories
 
 class TurnGenerationError(RuntimeError):
     pass
+
+
+def _format_validation_error(exc: ValidationError) -> str:
+    details = []
+    for error in exc.errors(include_url=False)[:5]:
+        field_path = ".".join(str(part) for part in error["loc"])
+        details.append(f"{field_path}: {error['msg']}")
+    return "; ".join(details)
 
 
 def _extract_json(content: str) -> dict[str, Any]:
@@ -69,14 +77,20 @@ def _parse_response(
         try:
             return MemoryRequest.model_validate(parsed)
         except ValidationError as exc:
-            raise TurnGenerationError("模型的记忆查阅请求字段不完整") from exc
+            detail = _format_validation_error(exc)
+            raise TurnGenerationError(
+                f"模型的记忆查阅请求字段不完整：{detail}"
+            ) from exc
     if response_type != "narrative":
         raise TurnGenerationError("模型响应的 response_type 无效")
     parsed = _normalize_narrative_payload(parsed, default_offset_rate)
     try:
         response = NarrativeResponse.model_validate(parsed)
     except ValidationError as exc:
-        raise TurnGenerationError("模型的剧情结构字段不完整或类型错误") from exc
+        detail = _format_validation_error(exc)
+        raise TurnGenerationError(
+            f"模型的剧情结构字段不完整或类型错误：{detail}"
+        ) from exc
     normal_choices = [choice for choice in response.choices if choice.kind != "free_text"]
     free_choice = next(
         (choice for choice in reversed(response.choices) if choice.kind == "free_text"),
@@ -548,14 +562,18 @@ async def _request_response(
             {
                 "role": "user",
                 "content": (
-                    "上一条响应没有通过结构校验。请重新生成同一回合，只返回合法 JSON；"
-                    "必须包含 response_type、turn、choices、worldline 和 memory_update，"
-                    "最后一个 choices 必须是 kind=free_text 的其他选项。"
+                    "第一次生成没有通过结构校验，请根据同一上下文从头重新生成本回合。\n"
+                    f"校验失败原因：{first_error}\n"
+                    "不要解释错误，不要复述规则，只返回符合以下协议的一个 JSON 对象。\n\n"
+                    f"{TURN_OUTPUT_PROTOCOL}"
                 ),
             },
         ]
         try:
-            repaired_response = await provider.chat_completion(repair_messages)
+            repaired_response = await provider.chat_completion(
+                repair_messages,
+                temperature=0,
+            )
         except httpx.HTTPStatusError as exc:
             raise TurnGenerationError(
                 f"模型服务返回 HTTP {exc.response.status_code}"
@@ -643,4 +661,3 @@ def _limit_recent_turns(
         used += turn_size
     selected.reverse()
     return selected
-
