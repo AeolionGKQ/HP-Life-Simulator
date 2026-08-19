@@ -166,10 +166,16 @@ async function assertReadableSecondaryText(page: Page) {
     const style = getComputedStyle(document.documentElement);
     return {
       foreground: style.getPropertyValue("--muted-dark"),
-      background: style.getPropertyValue("--surface"),
+      backgrounds: [
+        style.getPropertyValue("--surface"),
+        style.getPropertyValue("--surface-raised"),
+        style.getPropertyValue("--surface-soft"),
+      ],
     };
   });
-  expect(contrastRatio(tokens.foreground, tokens.background)).toBeGreaterThanOrEqual(4.5);
+  for (const background of tokens.backgrounds) {
+    expect(contrastRatio(tokens.foreground, background)).toBeGreaterThanOrEqual(4.5);
+  }
 
   const placeholder = await page.locator(".era-start-actions input").evaluate((element) => ({
     foreground: getComputedStyle(element, "::placeholder").color,
@@ -238,6 +244,7 @@ for (const viewport of viewports) {
     test("captures the character setup archive", async ({ page }) => {
       await installApi(page, "setup");
       await page.goto("/");
+      await expect(page.locator(".save-card")).toHaveCSS("cursor", "auto");
       await page.getByRole("button", { name: `打开存档：${setupSession.name}` }).click();
       await expect(page.getByRole("heading", { name: setupView.current.title })).toBeVisible();
       if (viewport.name === "mobile") await assertMinimumTouchTargets(page);

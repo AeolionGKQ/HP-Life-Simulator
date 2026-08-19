@@ -14,7 +14,7 @@
   --text: #eee9dc;
   --text-soft: #cbc8bd;
   --muted: #989b92;
-  --muted-dark: #858b82;
+  --muted-dark: #868c83;
   --accent: #d2ad5b;
   --accent-bright: #e1c277;
   --accent-ink: #18150d;
@@ -543,7 +543,7 @@ textarea:focus { border-color: var(--accent); background: #101610; outline: 0; }
 
 .save-section { margin-top: 16px; padding: clamp(22px, 3vw, 34px); }
 .save-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 9px; margin-top: 22px; }
-.save-card { justify-content: flex-start; min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-raised); cursor: pointer; transition: border-color 150ms ease, background-color 150ms ease; }
+.save-card { justify-content: flex-start; min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-raised); transition: border-color 150ms ease, background-color 150ms ease; }
 .save-card:hover { border-color: rgba(229, 218, 190, 0.24); background: var(--surface-soft); }
 .save-card.selected { border-color: var(--accent); background: rgba(210, 173, 91, 0.08); }
 .save-card-icon { display: grid; place-items: center; width: 42px; height: 42px; flex: 0 0 42px; color: var(--accent); border: 1px solid var(--line-strong); border-radius: 50%; }
