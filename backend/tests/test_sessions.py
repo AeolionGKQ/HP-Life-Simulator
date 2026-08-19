@@ -1,7 +1,19 @@
 from fastapi.testclient import TestClient
+from sqlalchemy import func, select
 
+from backend.app.db.session import get_session_factory
 from backend.app.providers.openai_compatible import OpenAICompatibleProvider
 from backend.app.main import create_app
+from backend.app.models import (
+    GameSession,
+    JournalEntry,
+    LongTermMemory,
+    NPCState,
+    PlayerState,
+    Relationship,
+    StorySummary,
+    TurnRecord,
+)
 
 
 def test_create_and_read_session() -> None:
@@ -34,6 +46,59 @@ def test_setup_requires_current_step() -> None:
         assert response.status_code == 409
 
 
+def test_rename_and_delete_save_clears_related_data() -> None:
+    with TestClient(create_app()) as client:
+        created = client.post(
+            "/api/sessions",
+            json={"name": "待整理卷宗"},
+        ).json()
+        session_id = created["id"]
+        renamed = client.patch(
+            f"/api/sessions/{session_id}",
+            json={"name": "月光下的第一卷"},
+        )
+        assert renamed.status_code == 200
+        assert renamed.json()["name"] == "月光下的第一卷"
+
+        for step in range(1, 13):
+            client.post(
+                f"/api/sessions/{session_id}/setup/answer",
+                json={
+                    "step": step,
+                    "answer": "second_generation" if step == 1 else f"answer-{step}",
+                },
+            )
+        client.post(
+            f"/api/sessions/{session_id}/setup/confirm",
+            json={"confirmed": True},
+        )
+        deleted = client.delete(f"/api/sessions/{session_id}")
+        assert deleted.status_code == 204
+        assert client.get(f"/api/sessions/{session_id}").status_code == 404
+
+    with get_session_factory()() as db:
+        for model in (
+            GameSession,
+            PlayerState,
+            NPCState,
+            Relationship,
+            TurnRecord,
+            JournalEntry,
+            LongTermMemory,
+            StorySummary,
+        ):
+            remaining = db.scalar(
+                select(func.count())
+                .select_from(model)
+                .where(model.session_id == session_id)
+            ) if model is not GameSession else db.scalar(
+                select(func.count())
+                .select_from(GameSession)
+                .where(GameSession.id == session_id)
+            )
+            assert remaining == 0
+
+
 def test_setup_materializes_npcs_and_state() -> None:
     with TestClient(create_app()) as client:
         created = client.post(
@@ -44,7 +109,10 @@ def test_setup_materializes_npcs_and_state() -> None:
         for step in range(1, 13):
             response = client.post(
                 f"/api/sessions/{session_id}/setup/answer",
-                json={"step": step, "answer": f"answer-{step}"},
+                json={
+                    "step": step,
+                    "answer": "second_generation" if step == 1 else f"answer-{step}",
+                },
             )
             assert response.status_code == 200
         confirmed = client.post(
@@ -66,8 +134,73 @@ def test_setup_materializes_npcs_and_state() -> None:
         assert len(relationships.json()) >= 9
 
 
+def test_setup_initial_friends_and_sorting_start() -> None:
+    answers = {
+        1: "second_generation",
+        2: "姓名：艾琳，性别：女，生日：1980-03-12，性取向：未设定",
+        3: "赤褐长发，浅灰色眼睛，身形纤细",
+        4: "混血家庭",
+        5: "照料过一只受伤的猫头鹰，曾和家中画像偷偷交谈",
+        6: "好奇求知，原则坚定",
+        7: "血统平等，知识不应被禁止",
+        8: "冬青木，独角兽毛，十一又四分之一英寸，柔韧",
+        9: "咒语直觉，神奇生物亲和",
+        10: "猫狸子混血猫",
+        11: "哈利·波特，赫敏·格兰杰，艾薇·摩尔",
+        12: "分院时",
+    }
+    with TestClient(create_app()) as client:
+        created = client.post(
+            "/api/sessions",
+            json={"name": "好友与分院起点测试"},
+        ).json()
+        session_id = created["id"]
+        for step, answer in answers.items():
+            response = client.post(
+                f"/api/sessions/{session_id}/setup/answer",
+                json={"step": step, "answer": answer},
+            )
+            assert response.status_code == 200
+        confirmed = client.post(
+            f"/api/sessions/{session_id}/setup/confirm",
+            json={"confirmed": True},
+        )
+        assert confirmed.status_code == 200
+
+        state = client.get(f"/api/sessions/{session_id}/state").json()["state"]
+        assert state["identity"]["name"] == "艾琳"
+        assert state["personality"]["traits"] == ["好奇求知", "原则坚定"]
+        assert [item["name"] for item in state["magic_talents"]] == [
+            "咒语直觉",
+            "神奇生物亲和",
+        ]
+        assert state["current_context"]["location_id"] == "hogwarts_great_hall"
+        assert state["current_context"]["activity"] == "sorting_ceremony"
+
+        npcs = client.get(f"/api/sessions/{session_id}/npcs").json()
+        custom_friend = next(
+            npc for npc in npcs if npc["state"]["name"] == "艾薇·摩尔"
+        )
+        assert custom_friend["is_original_character"] is False
+
+        relationships = client.get(
+            f"/api/sessions/{session_id}/relationships"
+        ).json()
+        friends = {
+            relationship["target_id"]: relationship
+            for relationship in relationships
+            if relationship["state"]["stage"] == "friend"
+        }
+        assert friends["harry_potter"]["state"]["affinity"] == 20
+        assert friends["hermione_granger"]["state"]["trust"] == 10
+        assert friends[custom_friend["npc_id"]]["state"]["affinity"] == 20
+
+
 def test_action_applies_rules_and_is_idempotent(monkeypatch) -> None:
+    captured_messages = []
+
     async def fake_completion(self, messages):
+        captured_messages.extend(messages)
         return {
             "choices": [
                 {
@@ -86,7 +219,26 @@ def test_action_applies_rules_and_is_idempotent(monkeypatch) -> None:
                               "id": "open_letter",
                               "label": "打开信封",
                               "kind": "action",
-                              "risk": "low"
+                              "risk": "low",
+                              "effects": {
+                                "gains": [
+                                  {
+                                    "id": "hogwarts_letter",
+                                    "name": "霍格沃兹来信",
+                                    "type": "item",
+                                    "direction": "gain",
+                                    "description": "一封改变人生的来信"
+                                  },
+                                  {
+                                    "id": "spell_practice",
+                                    "name": "魔咒熟练",
+                                    "type": "trait",
+                                    "direction": "gain",
+                                    "description": "魔咒练习带来的正面词条"
+                                  }
+                                ],
+                                "losses": []
+                              }
                             },
                             {
                               "id": "choice_other",
@@ -96,6 +248,48 @@ def test_action_applies_rules_and_is_idempotent(monkeypatch) -> None:
                             }
                           ],
                           "state_proposals": {
+                            "attribute_deltas": {"courage": 1},
+                            "relationship_deltas": [
+                              {
+                                "npc_id": "hermione_granger",
+                                "affinity_delta": 4
+                              }
+                            ]
+                          },
+                          "player_changes": {
+                            "inventory_add": [
+                              {
+                                "item_id": "hogwarts_letter",
+                                "name": "霍格沃兹来信",
+                                "description": "一封改变人生的来信",
+                                "quantity": 1
+                              }
+                            ],
+                            "status_add": [
+                              {
+                                "id": "excited",
+                                "name": "期待",
+                                "description": "对即将到来的魔法生活充满期待",
+                                "severity": "normal"
+                              }
+                            ],
+                            "skill_add": [
+                              {
+                                "id": "spellcasting",
+                                "name": "魔咒",
+                                "description": "使用基础魔咒的能力",
+                                "level": 1
+                              }
+                            ],
+                            "trait_add": [
+                              {
+                                "id": "spell_practice",
+                                "name": "魔咒熟练",
+                                "description": "你在魔咒练习中表现出稳定的专注力。",
+                                "polarity": "positive",
+                                "reason": "持续练习魔咒"
+                              }
+                            ],
                             "attribute_deltas": {"courage": 1},
                             "relationship_deltas": [
                               {
@@ -131,7 +325,10 @@ def test_action_applies_rules_and_is_idempotent(monkeypatch) -> None:
         for step in range(1, 13):
             client.post(
                 f"/api/sessions/{session_id}/setup/answer",
-                json={"step": step, "answer": f"answer-{step}"},
+                json={
+                    "step": step,
+                    "answer": "second_generation" if step == 1 else f"answer-{step}",
+                },
             )
         client.post(
             f"/api/sessions/{session_id}/setup/confirm",
@@ -147,6 +344,11 @@ def test_action_applies_rules_and_is_idempotent(monkeypatch) -> None:
         assert result.status_code == 200
         assert result.json()["state_version"] == 2
         assert result.json()["response"]["worldline"]["offset_rate"] == 3.5
+        assert result.json()["response"]["applied_changes"]["trait_add"][0]["name"] == "魔咒熟练"
+        assert result.json()["response"]["choices"][0]["effects"]["gains"][0]["name"] == "霍格沃兹来信"
+        prompt_context = captured_messages[-1]["content"]
+        assert '"generation_mainline"' in prompt_context
+        assert "霍格沃茨之战" in prompt_context
 
         repeated = client.post(f"/api/sessions/{session_id}/actions", json=action)
         assert repeated.status_code == 200
@@ -155,3 +357,7 @@ def test_action_applies_rules_and_is_idempotent(monkeypatch) -> None:
         state = client.get(f"/api/sessions/{session_id}/state").json()["state"]
         assert state["attributes"]["courage"] == 1
         assert state["current_context"]["datetime"].endswith("09:15:00+00:00")
+        assert state["inventory"][0]["item_id"] == "hogwarts_letter"
+        assert state["statuses"][0]["id"] == "excited"
+        assert state["skills"]["spellcasting"]["name"] == "魔咒"
+        assert state["traits"][0]["description"] == "你在魔咒练习中表现出稳定的专注力。"

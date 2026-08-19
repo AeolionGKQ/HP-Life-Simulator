@@ -15,7 +15,9 @@ def apply_turn_rules(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """应用模型提出的可验证变化，返回新状态和审计差异。"""
     next_state = deepcopy(state)
-    proposals = response.state_proposals
+    proposals = response.player_changes.model_dump()
+    if not any(proposals.values()) and response.state_proposals:
+        proposals = deepcopy(response.state_proposals)
     changes: dict[str, Any] = {}
 
     context = next_state.setdefault("current_context", {})
@@ -36,6 +38,9 @@ def apply_turn_rules(
         next_state, "attributes", proposals.get("attribute_deltas"), changes
     )
     _apply_skills(next_state, proposals.get("skill_deltas"), changes)
+    _apply_skill_entries(next_state, proposals, changes)
+    _apply_statuses(next_state, proposals, changes)
+    _apply_traits(next_state, proposals, changes)
     _apply_reputation(next_state, proposals.get("reputation_deltas"), changes)
     _apply_inventory(next_state, proposals, changes)
     _apply_relationships(next_state, relationships, proposals, changes)
@@ -106,6 +111,134 @@ def _apply_skills(
         changes["skills"] = applied
 
 
+def _apply_skill_entries(
+    state: dict[str, Any],
+    proposals: dict[str, Any],
+    changes: dict[str, Any],
+) -> None:
+    skills = state.setdefault("skills", {})
+    added: list[str] = []
+    for item in proposals.get("skill_add", []) or []:
+        if not isinstance(item, dict):
+            continue
+        skill_id = _stable_id(item.get("id") or item.get("skill_id") or item.get("name"))
+        if not skill_id:
+            continue
+        current = skills.setdefault(
+            skill_id,
+            {
+                "name": item.get("name") or skill_id,
+                "level": 0,
+                "experience": 0,
+                "description": item.get("description", ""),
+            },
+        )
+        current["name"] = item.get("name") or current.get("name") or skill_id
+        current["description"] = item.get("description") or current.get(
+            "description", ""
+        )
+        current["level"] = max(
+            int(current.get("level", 0)),
+            int(item.get("level", 1)),
+        )
+        added.append(skill_id)
+    removed: list[str] = []
+    for raw_id in proposals.get("skill_remove", []) or []:
+        skill_id = _stable_id(raw_id)
+        if skill_id in skills:
+            del skills[skill_id]
+            removed.append(skill_id)
+    if added or removed:
+        changes["skills_entries"] = {"added": added, "removed": removed}
+
+
+def _apply_statuses(
+    state: dict[str, Any],
+    proposals: dict[str, Any],
+    changes: dict[str, Any],
+) -> None:
+    statuses = state.setdefault("statuses", [])
+    by_id = {
+        str(item.get("id")): item
+        for item in statuses
+        if isinstance(item, dict) and item.get("id")
+    }
+    added: list[dict[str, Any]] = []
+    for item in proposals.get("status_add", []) or []:
+        if not isinstance(item, dict):
+            continue
+        status_id = _stable_id(item.get("id") or item.get("name"))
+        if not status_id:
+            continue
+        value = {
+            "id": status_id,
+            "name": item.get("name") or status_id,
+            "description": item.get("description") or item.get("effect", ""),
+            "severity": item.get("severity", "normal"),
+            "duration_minutes": item.get("duration_minutes"),
+        }
+        by_id[status_id] = value
+        added.append(value)
+    removed: list[str] = []
+    for raw_id in proposals.get("status_remove", []) or []:
+        status_id = _stable_id(raw_id)
+        if status_id in by_id:
+            del by_id[status_id]
+            removed.append(status_id)
+    state["statuses"] = list(by_id.values())
+    if added or removed:
+        changes["statuses"] = {"added": added, "removed": removed}
+
+
+def _apply_traits(
+    state: dict[str, Any],
+    proposals: dict[str, Any],
+    changes: dict[str, Any],
+) -> None:
+    traits = state.setdefault("traits", [])
+    by_id = {
+        str(item.get("id")): item
+        for item in traits
+        if isinstance(item, dict) and item.get("id")
+    }
+    added: list[dict[str, Any]] = []
+    for item in (proposals.get("trait_add", []) or [])[:2]:
+        if not isinstance(item, dict):
+            continue
+        trait_id = _stable_id(item.get("id") or item.get("name"))
+        name = str(item.get("name") or "")
+        description = str(item.get("description") or "")
+        if not trait_id or not name or not description:
+            continue
+        trait = {
+            "id": trait_id,
+            "name": name,
+            "description": description,
+            "polarity": (
+                "negative" if item.get("polarity") == "negative" else "positive"
+            ),
+            "source": item.get("source", ""),
+            "reason": item.get("reason", ""),
+        }
+        by_id[trait_id] = trait
+        added.append(trait)
+    removed: list[str] = []
+    for raw_id in proposals.get("trait_remove", []) or []:
+        trait_id = _stable_id(raw_id)
+        if trait_id in by_id:
+            del by_id[trait_id]
+            removed.append(trait_id)
+    state["traits"] = list(by_id.values())
+    if added or removed:
+        changes["traits"] = {"added": added, "removed": removed}
+
+
+def _stable_id(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip().lower().replace(" ", "_")
+
+
 def _apply_reputation(
     state: dict[str, Any],
     deltas: Any,
@@ -133,12 +266,41 @@ def _apply_inventory(
     inventory = state.setdefault("inventory", [])
     added = proposals.get("inventory_add", [])
     removed = proposals.get("inventory_remove", [])
+    added_items = []
     if isinstance(added, list):
-        inventory.extend(item for item in added if isinstance(item, dict))
+        for item in added:
+            if not isinstance(item, dict):
+                continue
+            item_id = _stable_id(item.get("item_id") or item.get("id") or item.get("name"))
+            if not item_id:
+                continue
+            normalized_item = {
+                **item,
+                "item_id": item_id,
+                "name": item.get("name") or item_id,
+                "description": item.get("description") or item.get("effect", ""),
+                "quantity": max(1, int(item.get("quantity", 1))),
+            }
+            existing = next(
+                (
+                    current
+                    for current in inventory
+                    if isinstance(current, dict)
+                    and current.get("item_id") == item_id
+                ),
+                None,
+            )
+            if existing is not None:
+                existing["quantity"] = int(existing.get("quantity", 1)) + normalized_item["quantity"]
+            else:
+                inventory.append(normalized_item)
+            added_items.append(normalized_item)
     removed_ids = {
-        str(item.get("item_id"))
+        _stable_id(item.get("item_id") or item.get("id") or item.get("name"))
+        if isinstance(item, dict)
+        else _stable_id(item)
         for item in removed
-        if isinstance(item, dict) and item.get("item_id")
+        if (isinstance(item, (dict, str)) and item)
     } if isinstance(removed, list) else set()
     if removed_ids:
         state["inventory"] = [
@@ -146,9 +308,9 @@ def _apply_inventory(
             for item in inventory
             if str(item.get("item_id")) not in removed_ids
         ]
-    if added or removed_ids:
+    if added_items or removed_ids:
         changes["inventory"] = {
-            "added": added if isinstance(added, list) else [],
+            "added": added_items,
             "removed_ids": sorted(removed_ids),
         }
 

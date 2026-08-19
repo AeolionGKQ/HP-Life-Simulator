@@ -9,6 +9,10 @@ class SetupOption(BaseModel):
     id: str
     label: str
     description: str = ""
+    value: str | None = None
+    category: str = ""
+    appendable: bool = False
+    available: bool = True
 
 
 class SetupStep(BaseModel):
@@ -16,6 +20,7 @@ class SetupStep(BaseModel):
     title: str
     description: str
     options: list[SetupOption] = []
+    selection_mode: Literal["single", "append", "text", "confirm"] = "single"
 
 
 class SetupView(BaseModel):
@@ -35,6 +40,45 @@ class SetupConfirm(BaseModel):
     confirmed: bool = True
 
 
+class TraitEntry(BaseModel):
+    id: str = ""
+    name: str = ""
+    description: str = ""
+    polarity: Literal["positive", "negative"] = "positive"
+    source: str = ""
+    reason: str = ""
+
+
+class ChoiceEffect(BaseModel):
+    id: str = ""
+    name: str
+    type: Literal["item", "status", "skill", "trait", "attribute", "relationship"]
+    direction: Literal["gain", "loss", "change"]
+    description: str = ""
+
+
+class ChoiceEffects(BaseModel):
+    gains: list[ChoiceEffect] = []
+    losses: list[ChoiceEffect] = []
+    note: str = ""
+
+
+class PlayerChanges(BaseModel):
+    inventory_add: list[dict[str, Any]] = []
+    inventory_remove: list[str] = []
+    status_add: list[dict[str, Any]] = []
+    status_remove: list[str] = []
+    skill_add: list[dict[str, Any]] = []
+    skill_remove: list[str] = []
+    skill_deltas: dict[str, int] = {}
+    trait_add: list[TraitEntry] = []
+    trait_remove: list[str] = []
+    vital_deltas: dict[str, float] = {}
+    attribute_deltas: dict[str, float] = {}
+    reputation_deltas: dict[str, int] = {}
+    relationship_deltas: list[dict[str, Any]] = []
+
+
 class Choice(BaseModel):
     id: str
     label: str
@@ -42,6 +86,7 @@ class Choice(BaseModel):
     risk: str = "unknown"
     requires: list[str] = []
     effects_hint: str = ""
+    effects: ChoiceEffects = ChoiceEffects()
 
 
 class WorldlineResponse(BaseModel):
@@ -71,6 +116,8 @@ class NarrativeResponse(BaseModel):
     turn: NarrativeTurn
     choices: list[Choice]
     state_proposals: dict[str, Any] = {}
+    player_changes: PlayerChanges = PlayerChanges()
+    applied_changes: PlayerChanges = PlayerChanges()
     worldline: WorldlineResponse
     events: list[dict[str, Any]] = []
     memory_update: MemoryUpdate = MemoryUpdate()

@@ -4,12 +4,14 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from backend.app.core.config import get_settings
+from backend.app.core.config import LLMSettings, get_settings, update_llm_config
+from backend.app.content.eras import list_eras
 from backend.app.db.session import get_db, get_engine
 from backend.app.models import GameSession
 from backend.app.providers.openai_compatible import OpenAICompatibleProvider
 from backend.app.schemas.common import (
     HealthResponse,
+    LLMConfigUpdate,
     LLMConfigStatus,
     LLMConnectionResult,
 )
@@ -54,6 +56,11 @@ from backend.app.services.turns import TurnGenerationError, generate_turn
 router = APIRouter(prefix="/api")
 
 
+@router.get("/content/eras")
+def get_eras() -> list[dict[str, object]]:
+    return list_eras()
+
+
 @router.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
     settings = get_settings()
@@ -83,15 +90,47 @@ def llm_config_status() -> LLMConfigStatus:
 
 
 @router.post("/llm/test", response_model=LLMConnectionResult)
-async def test_llm_connection() -> LLMConnectionResult:
+async def test_llm_connection(
+    payload: LLMConfigUpdate | None = None,
+) -> LLMConnectionResult:
     settings = get_settings()
-    provider = OpenAICompatibleProvider(settings.llm)
+    llm_settings = settings.llm
+    if payload is not None:
+        llm_settings = LLMSettings(
+            base_url=payload.base_url,
+            api_key=payload.api_key,
+            model=payload.model,
+            timeout_seconds=settings.llm.timeout_seconds,
+            temperature=settings.llm.temperature,
+            max_output_tokens=settings.llm.max_output_tokens,
+            supports_json_schema=settings.llm.supports_json_schema,
+            stream=False,
+        )
+    provider = OpenAICompatibleProvider(llm_settings)
     success, message, latency_ms = await provider.test_connection()
     return LLMConnectionResult(
         success=success,
-        model=settings.llm.model,
+        model=llm_settings.model,
         message=message,
         latency_ms=latency_ms,
+    )
+
+
+@router.put("/config/llm", response_model=LLMConfigStatus)
+def update_llm_config_route(payload: LLMConfigUpdate) -> LLMConfigStatus:
+    try:
+        settings = update_llm_config(
+            base_url=payload.base_url,
+            api_key=payload.api_key,
+            model=payload.model,
+        )
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail="无法写入本地配置文件") from exc
+    return LLMConfigStatus(
+        configured=bool(settings.llm.api_key.get_secret_value()),
+        base_url=settings.llm.base_url,
+        model=settings.llm.model,
+        api_key_present=True,
     )
 
 

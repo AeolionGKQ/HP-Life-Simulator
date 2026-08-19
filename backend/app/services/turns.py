@@ -30,6 +30,7 @@ from backend.app.schemas.game import (
     Choice,
     MemoryRequest,
     NarrativeResponse,
+    PlayerChanges,
     TurnResponse,
 )
 from backend.app.services.memory import get_memories_by_ids, recall_memories
@@ -166,8 +167,11 @@ def _normalize_narrative_payload(
                 or choice.get("id")
                 or "继续",
             ),
-            "kind": choice.get("kind") or (
+                "kind": choice.get("kind") or (
                 "free_text" if str(choice.get("id", "")).lower() in {"other", "choice_other"} else "action"
+                ),
+            "effects": _normalize_choice_effects(
+                choice.get("effects") or choice.get("potential_changes")
             ),
         }
         for choice in choices
@@ -185,11 +189,105 @@ def _normalize_narrative_payload(
         "reason": worldline.get("reason", "本轮未提供新的世界线偏移说明"),
         "affected_nodes": worldline.get("affected_nodes", []),
     }
-    normalized.setdefault("state_proposals", normalized.get("state_changes") or {})
+    raw_changes = (
+        normalized.get("player_changes")
+        or normalized.get("changes")
+        or normalized.get("state_changes")
+        or normalized.get("state_proposals")
+        or {}
+    )
+    normalized["player_changes"] = _normalize_player_changes(raw_changes)
+    normalized["state_proposals"] = normalized["player_changes"]
     normalized.setdefault("memory_update", normalized.get("memory") or {})
     normalized.setdefault("events", [])
     normalized.setdefault("self_check", {})
     return normalized
+
+
+def _normalize_choice_effects(raw_effects: Any) -> dict[str, Any]:
+    if not isinstance(raw_effects, dict):
+        return {"gains": [], "losses": [], "note": ""}
+    result: dict[str, Any] = {
+        "gains": raw_effects.get("gains")
+        or raw_effects.get("acquire")
+        or raw_effects.get("obtained")
+        or [],
+        "losses": raw_effects.get("losses")
+        or raw_effects.get("lose")
+        or raw_effects.get("lost")
+        or [],
+        "note": str(raw_effects.get("note") or ""),
+    }
+    for direction in ("gains", "losses"):
+        normalized_effects = []
+        for effect in result[direction]:
+            if not isinstance(effect, dict):
+                continue
+            normalized_effects.append(
+                {
+                    **effect,
+                    "name": str(effect.get("name") or effect.get("label") or "未知变化"),
+                    "type": effect.get("type") or "item",
+                    "direction": effect.get("direction") or (
+                        "gain" if direction == "gains" else "loss"
+                    ),
+                    "description": str(
+                        effect.get("description") or effect.get("reason") or ""
+                    ),
+                }
+            )
+        result[direction] = normalized_effects
+    return result
+
+
+def _normalize_player_changes(raw_changes: Any) -> dict[str, Any]:
+    if not isinstance(raw_changes, dict):
+        return {}
+    changes = dict(raw_changes)
+    aliases = {
+        "items_add": "inventory_add",
+        "items_remove": "inventory_remove",
+        "statuses_add": "status_add",
+        "statuses_remove": "status_remove",
+        "skills_add": "skill_add",
+        "skills_remove": "skill_remove",
+        "traits_add": "trait_add",
+        "traits_remove": "trait_remove",
+    }
+    for source, target in aliases.items():
+        if target not in changes and source in changes:
+            changes[target] = changes[source]
+    normalized_traits = []
+    for trait in changes.get("trait_add", []) or []:
+        if not isinstance(trait, dict):
+            continue
+        name = str(trait.get("name") or trait.get("label") or "")
+        trait_id = str(
+            trait.get("id")
+            or re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+            or f"trait_{uuid4().hex[:8]}"
+        )
+        normalized_traits.append(
+            {
+                **trait,
+                "id": trait_id,
+                "name": name,
+                "description": str(
+                    trait.get("description")
+                    or trait.get("effect")
+                    or trait.get("reason")
+                    or "该词条的具体作用由当前剧情决定。"
+                ),
+                "polarity": (
+                    "negative"
+                    if str(trait.get("polarity", "positive")).lower()
+                    in {"negative", "负面", "negative_trait"}
+                    else "positive"
+                ),
+            }
+        )
+    changes["trait_add"] = normalized_traits
+    return changes
 
 
 def _action_text(payload: ActionRequest) -> str:
@@ -339,6 +437,8 @@ async def generate_turn(
     )
     state["worldline"] = response.worldline.model_dump()
     player_state.state = state
+    visible_changes = _visible_changes(authoritative_changes)
+    response.applied_changes = PlayerChanges.model_validate(visible_changes)
     game_session.state_version += 1
     sequence = (
         db.scalar(
@@ -361,6 +461,7 @@ async def generate_turn(
         proposed_changes=response.state_proposals,
         authoritative_changes={
             **authoritative_changes,
+            "visible": visible_changes,
             "worldline": response.worldline.model_dump(),
         },
         memory_update=response.memory_update.model_dump(),
@@ -398,6 +499,31 @@ async def generate_turn(
         state_version=turn.state_version_after,
         recalled_memory_ids=recalled_ids,
     )
+
+
+def _visible_changes(changes: dict[str, Any]) -> dict[str, Any]:
+    inventory = changes.get("inventory", {})
+    statuses = changes.get("statuses", {})
+    traits = changes.get("traits", {})
+    skill_entries = changes.get("skills_entries", {})
+    return {
+        "inventory_add": inventory.get("added", []),
+        "inventory_remove": inventory.get("removed_ids", []),
+        "status_add": statuses.get("added", []),
+        "status_remove": statuses.get("removed", []),
+        "skill_add": [
+            {"id": skill_id, "name": skill_id}
+            for skill_id in skill_entries.get("added", [])
+        ],
+        "skill_remove": skill_entries.get("removed", []),
+        "skill_deltas": changes.get("skills", {}),
+        "trait_add": traits.get("added", []),
+        "trait_remove": traits.get("removed", []),
+        "vital_deltas": changes.get("vitals", {}),
+        "attribute_deltas": changes.get("attributes", {}),
+        "reputation_deltas": changes.get("reputation", {}),
+        "relationship_deltas": changes.get("relationships", []),
+    }
 
 
 async def _request_response(

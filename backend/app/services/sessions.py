@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from backend.app.core.config import get_settings
@@ -13,6 +13,7 @@ from backend.app.models import (
     NPCState,
     PlayerState,
     Relationship,
+    StorySummary,
     TurnRecord,
 )
 
@@ -46,6 +47,7 @@ def initial_player_state() -> dict[str, Any]:
             "satiety": 100,
             "conditions": [],
         },
+        "statuses": [],
         "attributes": {
             "courage": 0,
             "wisdom": 0,
@@ -53,6 +55,8 @@ def initial_player_state() -> dict[str, Any]:
             "ambition": 0,
         },
         "skills": {},
+        "magic_talents": [],
+        "traits": [],
         "wand": None,
         "currency": {"galleons": 0, "sickles": 0, "knuts": 0},
         "inventory": [],
@@ -125,10 +129,19 @@ def rename_session(db: Session, game_session: GameSession, name: str) -> GameSes
 
 
 def delete_session(db: Session, game_session: GameSession) -> None:
-    player_state = get_player_state(db, game_session.id)
-    if player_state:
-        db.delete(player_state)
-    db.delete(game_session)
+    session_id = game_session.id
+    # Delete dependent rows in foreign-key order so no orphaned save data remains.
+    for model in (
+        JournalEntry,
+        LongTermMemory,
+        StorySummary,
+        Relationship,
+        NPCState,
+        TurnRecord,
+        PlayerState,
+    ):
+        db.execute(delete(model).where(model.session_id == session_id))
+    db.execute(delete(GameSession).where(GameSession.id == session_id))
     db.commit()
 
 

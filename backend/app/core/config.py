@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import tomllib
+import tomli_w
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -110,6 +111,25 @@ def _load_toml(path: Path) -> dict[str, Any]:
         )
     with path.open("rb") as config_file:
         return tomllib.load(config_file)
+
+
+def update_llm_config(
+    *,
+    base_url: str,
+    api_key: str,
+    model: str,
+) -> Settings:
+    """Update only local LLM settings and refresh the cached configuration."""
+    current = get_settings()
+    raw = _load_toml(current.config_path)
+    raw.setdefault("llm", {})
+    raw["llm"]["base_url"] = base_url.rstrip("/")
+    raw["llm"]["api_key"] = api_key
+    raw["llm"]["model"] = model
+    with current.config_path.open("wb") as config_file:
+        tomli_w.dump(raw, config_file)
+    get_settings.cache_clear()
+    return get_settings()
 
 
 @lru_cache(maxsize=1)

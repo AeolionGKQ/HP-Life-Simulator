@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import json
 from typing import Any
 
 import httpx
@@ -64,13 +65,18 @@ class OpenAICompatibleProvider:
                 max_tokens=8,
                 temperature=0,
             )
-            content = (
+            raw_content = (
                 result.get("choices", [{}])[0]
                 .get("message", {})
                 .get("content", "")
-                .strip()
             )
-            message = content or "模型已返回响应"
+            if isinstance(raw_content, str):
+                content = raw_content.strip()
+            elif raw_content is None:
+                content = ""
+            else:
+                content = json.dumps(raw_content, ensure_ascii=False)
+            message = "模型服务连接成功" if content else "模型服务已成功返回响应"
             success = True
         except httpx.HTTPStatusError as exc:
             message = f"模型服务返回 HTTP {exc.response.status_code}"

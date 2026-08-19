@@ -12,6 +12,25 @@ export interface LLMConfigStatus {
   api_key_present: boolean;
 }
 
+export interface LLMConnectionResult {
+  success: boolean;
+  model: string;
+  message: string;
+  latency_ms: number;
+}
+
+export interface EraInfo {
+  id: string;
+  name: string;
+  years: string;
+  eyebrow: string;
+  title: string;
+  description: string;
+  mainline: string;
+  atmosphere: string;
+  available: boolean;
+}
+
 export interface GameSession {
   id: string;
   name: string;
@@ -30,6 +49,10 @@ export interface SetupOption {
   id: string;
   label: string;
   description: string;
+  value: string | null;
+  category: string;
+  appendable: boolean;
+  available: boolean;
 }
 
 export interface SetupView {
@@ -41,6 +64,7 @@ export interface SetupView {
     title: string;
     description: string;
     options: SetupOption[];
+    selection_mode: "single" | "append" | "text" | "confirm";
   };
   answers: Record<string, unknown>;
 }
@@ -67,6 +91,28 @@ export interface Relationship {
   state: Record<string, any>;
 }
 
+export interface NPCState {
+  npc_id: string;
+  is_original_character: boolean;
+  state: Record<string, any>;
+}
+
+export interface PlayerChanges {
+  inventory_add: Array<Record<string, any>>;
+  inventory_remove: string[];
+  status_add: Array<Record<string, any>>;
+  status_remove: string[];
+  skill_add: Array<Record<string, any>>;
+  skill_remove: string[];
+  skill_deltas: Record<string, number>;
+  trait_add: Array<Record<string, any>>;
+  trait_remove: string[];
+  vital_deltas: Record<string, number>;
+  attribute_deltas: Record<string, number>;
+  reputation_deltas: Record<string, number>;
+  relationship_deltas: Array<Record<string, any>>;
+}
+
 export interface TurnResult {
   turn_id: string;
   sequence: number;
@@ -86,6 +132,23 @@ export interface TurnResult {
       kind: string;
       risk: string;
       effects_hint: string;
+      effects: {
+        gains: Array<{
+          id: string;
+          name: string;
+          type: string;
+          direction: string;
+          description: string;
+        }>;
+        losses: Array<{
+          id: string;
+          name: string;
+          type: string;
+          direction: string;
+          description: string;
+        }>;
+        note: string;
+      };
     }>;
     worldline: {
       offset_rate: number;
@@ -93,6 +156,8 @@ export interface TurnResult {
       reason: string;
       affected_nodes: string[];
     };
+    player_changes: PlayerChanges;
+    applied_changes: PlayerChanges;
     memory_update: {
       summary: string;
     };
@@ -116,7 +181,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    throw new Error(body.detail ?? `请求失败（${response.status}）`);
+    const detail = body.detail;
+    const message = typeof detail === "string"
+      ? detail
+      : detail
+        ? JSON.stringify(detail)
+        : `请求失败（${response.status}）`;
+    throw new Error(message);
   }
   if (response.status === 204) {
     return undefined as T;
@@ -127,12 +198,30 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   health: () => request<HealthResponse>("/api/health"),
   llmConfig: () => request<LLMConfigStatus>("/api/config/llm"),
+  eras: () => request<EraInfo[]>("/api/content/eras"),
+  updateLlmConfig: (payload: { base_url: string; api_key: string; model: string }) =>
+    request<LLMConfigStatus>("/api/config/llm", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+  testLlm: (payload?: { base_url: string; api_key: string; model: string }) =>
+    request<LLMConnectionResult>("/api/llm/test", {
+      method: "POST",
+      body: payload ? JSON.stringify(payload) : undefined,
+    }),
   sessions: () => request<GameSession[]>("/api/sessions"),
   createSession: (name: string) =>
     request<GameSession>("/api/sessions", {
       method: "POST",
       body: JSON.stringify({ name }),
     }),
+  renameSession: (id: string, name: string) =>
+    request<GameSession>(`/api/sessions/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+    }),
+  deleteSession: (id: string) =>
+    request<void>(`/api/sessions/${id}`, { method: "DELETE" }),
   session: (id: string) => request<SessionDetail>(`/api/sessions/${id}`),
   setup: (id: string) => request<SetupView>(`/api/sessions/${id}/setup`),
   answerSetup: (id: string, step: number, answer: unknown) =>
@@ -149,6 +238,7 @@ export const api = {
   journal: (id: string) => request<JournalEntry[]>(`/api/sessions/${id}/journal`),
   relationships: (id: string) =>
     request<Relationship[]>(`/api/sessions/${id}/relationships`),
+  npcs: (id: string) => request<NPCState[]>(`/api/sessions/${id}/npcs`),
   turns: (id: string) => request<StoredTurn[]>(`/api/sessions/${id}/turns`),
   action: (
     id: string,
