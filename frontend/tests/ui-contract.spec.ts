@@ -58,3 +58,20 @@ test("opens model settings as a named dialog with an accessible close control", 
   await expect(dialog.getByRole("button", { name: "关闭模型服务配置" })).toBeVisible();
 });
 
+test("keeps keyboard focus inside model settings and restores it when closed", async ({ page }) => {
+  const trigger = page.getByRole("button", { name: "修改 / 测试" });
+  await trigger.click();
+
+  const dialog = page.getByRole("dialog", { name: "模型服务配置" });
+  const close = dialog.getByRole("button", { name: "关闭模型服务配置" });
+  await expect(close).toBeFocused();
+
+  await page.keyboard.press("Shift+Tab");
+  await expect(dialog.getByRole("button", { name: "保存配置" })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(close).toBeFocused();
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
+});

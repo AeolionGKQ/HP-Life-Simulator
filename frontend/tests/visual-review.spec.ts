@@ -139,6 +139,62 @@ async function assertNoHorizontalOverflow(page: Page) {
   expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
 }
 
+function parseColor(value: string): [number, number, number] {
+  const hex = value.trim().match(/^#([0-9a-f]{6})$/i);
+  if (hex) {
+    return [0, 2, 4].map((offset) => Number.parseInt(hex[1].slice(offset, offset + 2), 16)) as [number, number, number];
+  }
+  const rgb = value.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+  if (!rgb) throw new Error(`Unsupported CSS color: ${value}`);
+  return [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])];
+}
+
+function contrastRatio(foreground: string, background: string): number {
+  const luminance = (value: string) => {
+    const channels = parseColor(value).map((channel) => {
+      const normalized = channel / 255;
+      return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+  };
+  const values = [luminance(foreground), luminance(background)].sort((a, b) => b - a);
+  return (values[0] + 0.05) / (values[1] + 0.05);
+}
+
+async function assertReadableSecondaryText(page: Page) {
+  const tokens = await page.evaluate(() => {
+    const style = getComputedStyle(document.documentElement);
+    return {
+      foreground: style.getPropertyValue("--muted-dark"),
+      background: style.getPropertyValue("--surface"),
+    };
+  });
+  expect(contrastRatio(tokens.foreground, tokens.background)).toBeGreaterThanOrEqual(4.5);
+
+  const placeholder = await page.locator(".era-start-actions input").evaluate((element) => ({
+    foreground: getComputedStyle(element, "::placeholder").color,
+    background: getComputedStyle(element).backgroundColor,
+  }));
+  expect(contrastRatio(placeholder.foreground, placeholder.background)).toBeGreaterThanOrEqual(4.5);
+}
+
+async function assertMinimumTouchTargets(page: Page) {
+  const undersized = await page.locator("button, input, textarea").evaluateAll((elements) =>
+    elements
+      .filter((element) => {
+        const box = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return box.width > 0 && box.height > 0 && style.visibility !== "hidden";
+      })
+      .map((element) => {
+        const box = element.getBoundingClientRect();
+        return { label: element.getAttribute("aria-label") || element.textContent?.trim() || element.getAttribute("placeholder") || element.tagName, width: box.width, height: box.height };
+      })
+      .filter((target) => target.width < 44 || target.height < 44),
+  );
+  expect(undersized).toEqual([]);
+}
+
 const viewports = [
   { name: "desktop", width: 1440, height: 1000 },
   { name: "mobile", width: 390, height: 844 },
@@ -157,6 +213,8 @@ for (const viewport of viewports) {
       await installApi(page, "landing");
       await page.goto("/");
       await expect(page.getByText("本地服务已连接")).toBeVisible();
+      await assertReadableSecondaryText(page);
+      if (viewport.name === "mobile") await assertMinimumTouchTargets(page);
       await assertNoHorizontalOverflow(page);
       await page.screenshot({ path: `test-results/visual-review/${viewport.name}-landing.png` });
     });
@@ -172,6 +230,7 @@ for (const viewport of viewports) {
       if (!dialogBox) throw new Error("Model configuration dialog has no layout box");
       expect(dialogBox.y).toBeGreaterThanOrEqual(12);
       expect(dialogBox.y + dialogBox.height).toBeLessThanOrEqual(viewport.height - 12);
+      if (viewport.name === "mobile") await assertMinimumTouchTargets(page);
       await assertNoHorizontalOverflow(page);
       await page.screenshot({ path: `test-results/visual-review/${viewport.name}-config.png` });
     });
@@ -179,8 +238,9 @@ for (const viewport of viewports) {
     test("captures the character setup archive", async ({ page }) => {
       await installApi(page, "setup");
       await page.goto("/");
-      await page.getByText(setupSession.name).click();
+      await page.getByRole("button", { name: `打开存档：${setupSession.name}` }).click();
       await expect(page.getByRole("heading", { name: setupView.current.title })).toBeVisible();
+      if (viewport.name === "mobile") await assertMinimumTouchTargets(page);
       await assertNoHorizontalOverflow(page);
       await page.screenshot({ path: `test-results/visual-review/${viewport.name}-setup.png` });
     });
@@ -188,8 +248,9 @@ for (const viewport of viewports) {
     test("captures the active story archive", async ({ page }) => {
       await installApi(page, "story");
       await page.goto("/");
-      await page.getByText(activeSession.name).click();
+      await page.getByRole("button", { name: `打开存档：${activeSession.name}` }).click();
       await expect(page.getByRole("heading", { name: turnResponse.turn.title })).toBeVisible();
+      if (viewport.name === "mobile") await assertMinimumTouchTargets(page);
       await assertNoHorizontalOverflow(page);
       await page.screenshot({ path: `test-results/visual-review/${viewport.name}-story.png` });
     });

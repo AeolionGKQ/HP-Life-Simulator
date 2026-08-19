@@ -14,7 +14,7 @@
   --text: #eee9dc;
   --text-soft: #cbc8bd;
   --muted: #989b92;
-  --muted-dark: #72786f;
+  --muted-dark: #858b82;
   --accent: #d2ad5b;
   --accent-bright: #e1c277;
   --accent-ink: #18150d;
@@ -377,7 +377,7 @@ textarea {
 
 input { width: 220px; min-height: 42px; }
 input::placeholder,
-textarea::placeholder { color: #686f67; }
+textarea::placeholder { color: #858b82; }
 input:hover,
 textarea:hover { border-color: rgba(229, 218, 190, 0.24); }
 input:focus,
@@ -548,9 +548,11 @@ textarea:focus { border-color: var(--accent); background: #101610; outline: 0; }
 .save-card.selected { border-color: var(--accent); background: rgba(210, 173, 91, 0.08); }
 .save-card-icon { display: grid; place-items: center; width: 42px; height: 42px; flex: 0 0 42px; color: var(--accent); border: 1px solid var(--line-strong); border-radius: 50%; }
 .save-card-icon svg { width: 19px; height: 19px; }
-.save-card > div:nth-child(2) { min-width: 0; }
-.save-card h3 { overflow: hidden; margin-bottom: 4px; text-overflow: ellipsis; white-space: nowrap; }
-.save-card p { margin: 0; font: 10px/1.65 var(--sans); }
+.save-card-body { min-width: 0; flex: 1; }
+.save-card-open { display: grid; gap: 4px; width: 100%; min-height: 42px; padding: 0; color: var(--text); border: 0; background: transparent; text-align: left; }
+.save-card-open:hover .save-card-name { color: var(--accent-bright); }
+.save-card-name { overflow: hidden; font: 560 17px/1.4 var(--serif); text-overflow: ellipsis; white-space: nowrap; transition: color 150ms ease; }
+.save-card-meta { display: block; color: var(--muted); font: 10px/1.65 var(--sans); }
 .version { margin-left: auto; color: var(--muted-dark); font: 10px var(--sans); }
 .save-card-actions { display: flex; align-items: flex-end; flex-direction: column; gap: 5px; margin-left: auto; }
 .save-card-actions button,
@@ -630,11 +632,20 @@ textarea:focus { border-color: var(--accent); background: #101610; outline: 0; }
   .narrative-text { font-size: 15px; line-height: 1.92; }
   .config-modal { max-height: calc(100vh - 24px); padding: 24px 19px; overflow-y: auto; }
   .modal-actions button { width: 100%; min-height: 44px; }
+  button,
+  input,
+  textarea { min-height: 44px; }
+  .config-button,
+  .primary-button,
+  .secondary-button,
+  .save-card-actions button,
+  .save-rename button { min-height: 44px; }
+  .modal-close { width: 44px; height: 44px; }
   .save-grid { grid-template-columns: 1fr; }
   .save-card { align-items: flex-start; flex-wrap: wrap; }
   .save-card-actions { width: 100%; align-items: center; flex-direction: row; margin: 2px 0 0 56px; }
   .version { margin: 0 auto 0 0; }
-  .save-card-actions button { min-height: 40px; }
+  .save-card-actions button { min-height: 44px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

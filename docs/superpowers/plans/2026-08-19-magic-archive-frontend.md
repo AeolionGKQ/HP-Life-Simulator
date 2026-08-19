@@ -140,4 +140,3 @@
 - [ ] **Step 5: 检查差异与清理测试进程**
 
   运行 `git diff --check`、`git status --short` 和 `git diff -- frontend/src/api.ts`；要求无空白错误、`api.ts` 无差异。精确终止本轮 5173/8000 测试进程并确认端口释放。
-

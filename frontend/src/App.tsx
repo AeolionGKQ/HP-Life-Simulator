@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Archive,
   BookOpenText,
@@ -69,6 +69,8 @@ export function App() {
   const [setupLoading, setSetupLoading] = useState(false);
   const [worldlineRate, setWorldlineRate] = useState(0);
   const [configOpen, setConfigOpen] = useState(false);
+  const configTriggerRef = useRef<HTMLButtonElement>(null);
+  const configDialogRef = useRef<HTMLElement>(null);
   const [configDraft, setConfigDraft] = useState({
     base_url: "",
     api_key: "",
@@ -107,6 +109,55 @@ export function App() {
         setError(reason instanceof Error ? reason.message : "无法读取角色创建状态");
       });
   }, [selectedSessionId]);
+
+  useEffect(() => {
+    if (!configOpen) return;
+    const trigger = configTriggerRef.current;
+    const dialog = configDialogRef.current;
+    if (!dialog) return;
+
+    const focusableSelector = [
+      "button:not([disabled])",
+      "input:not([disabled])",
+      "textarea:not([disabled])",
+      "[href]",
+      "[tabindex]:not([tabindex='-1'])",
+    ].join(",");
+    const focusables = () => Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector));
+    const focusFrame = window.requestAnimationFrame(() => focusables()[0]?.focus());
+
+    const handleDialogKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setConfigOpen(false);
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const items = focusables();
+      if (items.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey && (active === first || !dialog.contains(active))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleDialogKeyDown);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.removeEventListener("keydown", handleDialogKeyDown);
+      window.requestAnimationFrame(() => trigger?.focus());
+    };
+  }, [configOpen]);
 
   const selectedSession = sessions.find((session) => session.id === selectedSessionId);
   const eraById = Object.fromEntries(eras.map((era) => [era.id, era]));
@@ -346,7 +397,7 @@ export function App() {
           <span className="service-label"><Sparkle aria-hidden="true" />模型服务</span>
           <strong>{llm?.model ?? "等待水晶球回应"}</strong>
           <small>{llm?.api_key_present ? "叙事水晶已与远方回响相连" : "叙事水晶尚未建立连接"}</small>
-          <button className="config-button" onClick={openConfig}><GearSix aria-hidden="true" />修改 / 测试</button>
+          <button ref={configTriggerRef} className="config-button" onClick={openConfig}><GearSix aria-hidden="true" />修改 / 测试</button>
         </div>
       </section>
 
@@ -358,6 +409,7 @@ export function App() {
             aria-labelledby="config-title"
             aria-modal="true"
             className="config-modal"
+            ref={configDialogRef}
             role="dialog"
             onClick={(event) => event.stopPropagation()}
           >
@@ -432,6 +484,7 @@ export function App() {
                           const value = option.value ?? option.label;
                           return (
                             <button
+                              aria-pressed={isSelectedOption(value)}
                               className={isSelectedOption(value) ? "setup-option selected" : "setup-option"}
                               disabled={!option.available}
                               key={option.id}
@@ -543,34 +596,47 @@ export function App() {
               <article
                 className={selectedSessionId === session.id ? "save-card selected" : "save-card"}
                 key={session.id}
-                onClick={() => setSelectedSessionId(session.id)}
               >
                 <div className="save-card-icon" aria-hidden="true"><Archive /></div>
-                <div>
+                <div className="save-card-body">
                   {renamingSessionId === session.id ? (
-                    <div className="save-rename" onClick={(event) => event.stopPropagation()}>
-                      <input
-                        autoFocus
-                        maxLength={200}
-                        value={renameDraft}
-                        onChange={(event) => setRenameDraft(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") void saveRename(session.id);
-                          if (event.key === "Escape") setRenamingSessionId(null);
-                        }}
-                      />
-                      <button disabled={saveManaging} onClick={() => void saveRename(session.id)}>保存</button>
-                      <button disabled={saveManaging} onClick={() => setRenamingSessionId(null)}>取消</button>
-                    </div>
+                    <>
+                      <div className="save-rename">
+                        <input
+                          aria-label={`重命名存档：${session.name}`}
+                          autoFocus
+                          maxLength={200}
+                          value={renameDraft}
+                          onChange={(event) => setRenameDraft(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") void saveRename(session.id);
+                            if (event.key === "Escape") setRenamingSessionId(null);
+                          }}
+                        />
+                        <button disabled={saveManaging} onClick={() => void saveRename(session.id)}>保存</button>
+                        <button disabled={saveManaging} onClick={() => setRenamingSessionId(null)}>取消</button>
+                      </div>
+                      <span className="save-card-meta">
+                        {(eraById[session.era_id] ?? GENERIC_ERA).years} ·{" "}
+                        {session.status === "setup" ? "命运书写中" : "世界线流转中"}
+                      </span>
+                    </>
                   ) : (
-                    <h3>{session.name}</h3>
+                    <button
+                      aria-label={`打开存档：${session.name}`}
+                      aria-pressed={selectedSessionId === session.id}
+                      className="save-card-open"
+                      onClick={() => setSelectedSessionId(session.id)}
+                    >
+                      <span className="save-card-name">{session.name}</span>
+                      <span className="save-card-meta">
+                        {(eraById[session.era_id] ?? GENERIC_ERA).years} ·{" "}
+                        {session.status === "setup" ? "命运书写中" : "世界线流转中"}
+                      </span>
+                    </button>
                   )}
-                  <p>
-                    {(eraById[session.era_id] ?? GENERIC_ERA).years} ·{" "}
-                    {session.status === "setup" ? "命运书写中" : "世界线流转中"}
-                  </p>
                 </div>
-                <div className="save-card-actions" onClick={(event) => event.stopPropagation()}>
+                <div className="save-card-actions">
                   <span className="version">v{session.state_version}</span>
                   <button disabled={saveManaging} onClick={() => beginRename(session)}><PencilSimple aria-hidden="true" />重命名</button>
                   <button className="danger" disabled={saveManaging} onClick={() => void removeSession(session)}><Trash aria-hidden="true" />删除</button>
