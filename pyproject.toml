@@ -1,6 +1,6 @@
 [project]
 name = "hp-simulator"
-version = "0.1.0"
+version = "1.1.0"
 description = "本地运行的霍格沃兹人生模拟器"
 requires-python = ">=3.12"
 dependencies = [
@@ -29,4 +29,3 @@ include = ["backend", "backend.*"]
 testpaths = ["backend/tests"]
 pythonpath = ["."]
 asyncio_mode = "auto"
-

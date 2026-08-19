@@ -1,6 +1,10 @@
 # Local secrets and runtime data
 config/settings.local.toml
+LLM API KEY.txt
 data/
+
+# Local-only launcher wrapper
+Start HP Simulator.bat
 
 # Python
 __pycache__/
