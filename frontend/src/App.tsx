@@ -1,5 +1,25 @@
 import { useEffect, useState } from "react";
 import {
+  Archive,
+  BookOpenText,
+  Envelope,
+  GearSix,
+  GitBranch,
+  GraduationCap,
+  Heart,
+  Medal,
+  PencilSimple,
+  Scroll,
+  Sparkle,
+  Star,
+  Trash,
+  User,
+  UsersThree,
+  WifiHigh,
+  WifiSlash,
+  X,
+} from "@phosphor-icons/react";
+import {
   api,
   type EraInfo,
   type GameSession,
@@ -9,7 +29,17 @@ import {
 } from "./api";
 import { GameView } from "./GameView";
 
-const menuItems = ["剧情", "角色", "纪事", "关系与好感", "恋爱", "声望", "课程", "信件", "世界线"];
+const menuItems = [
+  { label: "剧情", icon: BookOpenText },
+  { label: "角色", icon: User },
+  { label: "纪事", icon: Scroll },
+  { label: "关系与好感", icon: UsersThree },
+  { label: "恋爱", icon: Heart },
+  { label: "声望", icon: Medal },
+  { label: "课程", icon: GraduationCap },
+  { label: "信件", icon: Envelope },
+  { label: "世界线", icon: GitBranch },
+];
 
 const GENERIC_ERA: EraInfo = {
   id: "second_generation",
@@ -291,12 +321,17 @@ export function App() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <div>
+        <div className="brand-lockup">
+          <span className="brand-sigil" aria-hidden="true"><Star weight="fill" /></span>
+          <div>
           <p className="eyebrow">{currentEra.eyebrow}</p>
           <h1>霍格沃兹人生模拟器</h1>
+          </div>
         </div>
         <div className="connection-status">
-          <span className={`status-dot ${health?.status === "ok" ? "online" : ""}`} />
+          {health?.status === "ok"
+            ? <WifiHigh className="connection-icon online" aria-hidden="true" />
+            : <WifiSlash className="connection-icon" aria-hidden="true" />}
           {health?.status === "ok" ? "本地服务已连接" : "等待本地服务"}
         </div>
       </header>
@@ -308,10 +343,10 @@ export function App() {
           <p className="muted">{currentEra.description}</p>
         </div>
         <div className="config-card">
-          <span>模型服务</span>
+          <span className="service-label"><Sparkle aria-hidden="true" />模型服务</span>
           <strong>{llm?.model ?? "等待水晶球回应"}</strong>
           <small>{llm?.api_key_present ? "叙事水晶已与远方回响相连" : "叙事水晶尚未建立连接"}</small>
-          <button className="config-button" onClick={openConfig}>修改 / 测试</button>
+          <button className="config-button" onClick={openConfig}><GearSix aria-hidden="true" />修改 / 测试</button>
         </div>
       </section>
 
@@ -319,13 +354,19 @@ export function App() {
 
       {configOpen && (
         <div className="modal-backdrop" onClick={() => setConfigOpen(false)}>
-          <section className="config-modal" onClick={(event) => event.stopPropagation()}>
+          <section
+            aria-labelledby="config-title"
+            aria-modal="true"
+            className="config-modal"
+            role="dialog"
+            onClick={(event) => event.stopPropagation()}
+          >
             <div className="modal-heading">
               <div>
                 <p className="eyebrow">LOCAL MODEL SERVICE</p>
-                <h2>模型服务配置</h2>
+                <h2 id="config-title">模型服务配置</h2>
               </div>
-              <button className="modal-close" onClick={() => setConfigOpen(false)}>×</button>
+              <button aria-label="关闭模型服务配置" className="modal-close" onClick={() => setConfigOpen(false)}><X aria-hidden="true" /></button>
             </div>
             <p className="modal-note">配置只保存到本机文件，API Key 不会回显到页面。</p>
             <label>Base URL<input value={configDraft.base_url} onChange={(event) => setConfigDraft({ ...configDraft, base_url: event.target.value })} placeholder="https://api.example.com" /></label>
@@ -344,19 +385,20 @@ export function App() {
         <aside className="sidebar">
           <div className="sidebar-title">
             <span>魔法档案</span>
-            <span className="menu-mark">✦</span>
+            <Sparkle className="menu-mark" aria-hidden="true" />
           </div>
-          <nav>
-            {menuItems.map((item) => (
-              <button
-                className={activeMenu === item ? "menu-item active" : "menu-item"}
-                key={item}
-                onClick={() => setActiveMenu(item)}
-              >
-                {item}
-                {item === "世界线" && <span className="worldline-value">{worldlineRate.toFixed(1)}%</span>}
-              </button>
-            ))}
+          <nav aria-label="魔法档案导航">
+            {menuItems.map(({ label, icon: MenuIcon }) => (
+                <button
+                  aria-current={activeMenu === label ? "page" : undefined}
+                  className={activeMenu === label ? "menu-item active" : "menu-item"}
+                  key={label}
+                  onClick={() => setActiveMenu(label)}
+                >
+                  <span className="menu-label"><MenuIcon aria-hidden="true" />{label}</span>
+                  {label === "世界线" && <span className="worldline-value">{worldlineRate.toFixed(1)}%</span>}
+                </button>
+              ))}
           </nav>
           <div className="sidebar-note">
             这里的查看不会惊动时间齿轮，也不会打断正在编织的剧情。
@@ -458,7 +500,7 @@ export function App() {
             />
           ) : (
             <div className="empty-panel">
-              <span className="empty-icon">✧</span>
+              <span className="empty-icon" aria-hidden="true"><Sparkle /></span>
               <h3>从档案柜中取出一卷羊皮纸</h3>
               <p>为这段尚未书写的命运题名，随后将在角色创建的第一步选择时代。</p>
               <div className="era-start-actions">
@@ -503,7 +545,7 @@ export function App() {
                 key={session.id}
                 onClick={() => setSelectedSessionId(session.id)}
               >
-                <div className="save-card-icon">♜</div>
+                <div className="save-card-icon" aria-hidden="true"><Archive /></div>
                 <div>
                   {renamingSessionId === session.id ? (
                     <div className="save-rename" onClick={(event) => event.stopPropagation()}>
@@ -530,8 +572,8 @@ export function App() {
                 </div>
                 <div className="save-card-actions" onClick={(event) => event.stopPropagation()}>
                   <span className="version">v{session.state_version}</span>
-                  <button disabled={saveManaging} onClick={() => beginRename(session)}>重命名</button>
-                  <button className="danger" disabled={saveManaging} onClick={() => void removeSession(session)}>删除</button>
+                  <button disabled={saveManaging} onClick={() => beginRename(session)}><PencilSimple aria-hidden="true" />重命名</button>
+                  <button className="danger" disabled={saveManaging} onClick={() => void removeSession(session)}><Trash aria-hidden="true" />删除</button>
                 </div>
               </article>
             ))
@@ -617,4 +659,3 @@ function displayMessage(value: unknown, fallback: string): string {
   }
   return fallback;
 }
-

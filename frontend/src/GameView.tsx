@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { BookOpenText, MagicWand, Sparkle } from "@phosphor-icons/react";
 import {
   api,
   type JournalEntry,
@@ -133,13 +134,13 @@ export function GameView({
   const romanceRows = relationshipRows.filter((item) => isRomanticRelationship(item.state));
 
   if (!state) {
-    return <div className="empty-panel"><span className="empty-icon">✧</span><p>正在读取人生状态…</p></div>;
+    return <div className="empty-panel"><span className="empty-icon" aria-hidden="true"><BookOpenText /></span><p>正在读取人生状态…</p></div>;
   }
 
   if (loading) {
     return (
       <div className="magic-loading">
-        <div className="magic-orbit"><span>✦</span><span>✧</span><span>✦</span></div>
+        <div className="magic-orbit" aria-hidden="true"><MagicWand /></div>
         <h3>羽毛笔正在书写命运</h3>
         <p>魔法回响穿过时间与空间，命运正在为你编织下一幕……</p>
       </div>
@@ -154,7 +155,7 @@ export function GameView({
           <>
             <div className="status-grid">
               <Stat label="姓名" value={identity.name ?? "未命名巫师"} />
-              <Stat label="年龄" value={`${identity.age ?? "—"} 岁`} />
+              <Stat label="年龄" value={`${identity.age ?? "未记录"} 岁`} />
               <Stat label="年级" value={`${player.school?.year_level ?? 1} 年级`} />
               <Stat label="地点" value={translateValue(context.location_id ?? "unknown")} />
               <Stat label="HP" value={`${vitals.hp ?? 0}/${vitals.max_hp ?? 100}`} />
@@ -220,7 +221,7 @@ export function GameView({
   }
 
   return (
-    <div className="game-panel">
+    <section className="game-panel" aria-label="剧情档案">
       {error && <div className="error-banner">{error}</div>}
       <div className="game-meta">
         <span>{context.datetime ?? "1991-07-01 09:00"}</span>
@@ -229,7 +230,7 @@ export function GameView({
       </div>
       {!hasStarted ? (
         <div className="first-scene">
-          <span className="empty-icon">✧</span>
+          <span className="empty-icon" aria-hidden="true"><Sparkle /></span>
           <h3>城堡的烛火正在远方亮起</h3>
           <p>闭上眼，听蒸汽列车穿过薄雾。属于你的魔法世界，只差最后一步便会显现。</p>
           <button className="primary-button" disabled={loading} onClick={() => void submitAction("choice", "start_story")}>
@@ -278,7 +279,7 @@ export function GameView({
           </div>
         </>
       )}
-    </div>
+    </section>
   );
 }
 
