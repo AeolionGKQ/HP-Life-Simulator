@@ -59,6 +59,7 @@ export interface SetupView {
   current_step: number;
   completed: boolean;
   steps_total: number;
+  era_id: string;
   current: {
     step: number;
     title: string;
@@ -67,12 +68,80 @@ export interface SetupView {
     selection_mode: "single" | "append" | "text" | "confirm";
   };
   answers: Record<string, unknown>;
+  attribute_initialization: Record<string, any>;
 }
 
 export interface PlayerStateResponse {
   session_id: string;
   state_version: number;
   state: Record<string, any>;
+}
+
+export interface CourseOption {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  available: boolean;
+  unavailable_reason: string | null;
+  skill_id: string;
+  skill_level: number;
+}
+
+export interface CourseSkill {
+  id: string;
+  name: string;
+  description: string;
+  level: number;
+  experience: number;
+  source: string;
+  course_id: string;
+}
+
+export interface CourseSelection {
+  status: "pending" | "completed" | null;
+  phase: "elective" | "newt" | null;
+  min_courses: number;
+  max_courses: number;
+  available_course_ids: string[];
+}
+
+export interface CourseResult {
+  id: string;
+  name: string;
+  grade: string;
+}
+
+export interface CourseHistoryEntry {
+  school_year: string;
+  grade: string;
+  active_courses: string[];
+  selected_courses: string[];
+  skill_progression: Record<string, number>;
+}
+
+export interface CourseView {
+  session_id: string;
+  state_version: number;
+  grade: string;
+  school_year: string;
+  term: string;
+  active_courses: CourseOption[];
+  selection_options: CourseOption[];
+  editable_phase: "elective" | "newt" | null;
+  elective_courses: string[];
+  newt_courses: string[];
+  skills: CourseSkill[];
+  owl_results: CourseResult[];
+  newt_results: CourseResult[];
+  course_selection: CourseSelection | null;
+  course_history: CourseHistoryEntry[];
+}
+
+export interface CourseSelectionRequest {
+  expected_state_version: number;
+  selection_phase: "elective" | "newt";
+  course_ids: string[];
 }
 
 export interface JournalEntry {
@@ -105,10 +174,24 @@ export interface PlayerChanges {
   skill_add: Array<Record<string, any>>;
   skill_remove: string[];
   skill_deltas: Record<string, number>;
+  skill_experience_deltas: Record<string, number>;
+  course_skill_deltas: Record<string, number>;
   trait_add: Array<Record<string, any>>;
   trait_remove: string[];
-  vital_deltas: Record<string, number>;
-  attribute_deltas: Record<string, number>;
+  resource_deltas: Array<{
+    id: string;
+    delta: number;
+    reason_code: string;
+    reason: string;
+  }>;
+  dimension_deltas: Array<{
+    id: string;
+    delta: number;
+    reason_code: string;
+    reason: string;
+  }>;
+  resource_cap_deltas: Array<Record<string, any>>;
+  dimension_cap_deltas: Array<Record<string, any>>;
   reputation_deltas: Record<string, number>;
   relationship_deltas: Array<Record<string, any>>;
 }
@@ -123,14 +206,15 @@ export interface TurnResult {
       title: string;
       scene_type: string;
       narrative: string;
-      location_id: string | null;
-      time_advance_minutes: number;
+      current_date: string;
+      location_id: string;
+      time_advance_minutes?: number;
     };
     choices: Array<{
       id: string;
       label: string;
       kind: string;
-      risk: string;
+      risk: "low" | "medium" | "high" | "fatal";
       effects_hint: string;
       effects: {
         gains: Array<{
@@ -234,7 +318,17 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ confirmed: true }),
     }),
+  initializeAttributes: (id: string) =>
+    request<SetupView>(`/api/sessions/${id}/attributes/initialize`, {
+      method: "POST",
+    }),
   state: (id: string) => request<PlayerStateResponse>(`/api/sessions/${id}/state`),
+  courses: (id: string) => request<CourseView>(`/api/sessions/${id}/courses`),
+  selectCourses: (id: string, payload: CourseSelectionRequest) =>
+    request<CourseView>(`/api/sessions/${id}/courses`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
   journal: (id: string) => request<JournalEntry[]>(`/api/sessions/${id}/journal`),
   relationships: (id: string) =>
     request<Relationship[]>(`/api/sessions/${id}/relationships`),

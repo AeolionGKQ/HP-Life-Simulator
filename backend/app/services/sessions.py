@@ -6,6 +6,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from backend.app.core.config import get_settings
+from backend.app.content.attributes import initial_dimensions, initial_resources
 from backend.app.models import (
     GameSession,
     JournalEntry,
@@ -23,8 +24,20 @@ def initial_player_state() -> dict[str, Any]:
         "setup": {
             "current_step": 1,
             "completed": False,
+            "schema_version": 2,
             "answers": {},
         },
+        "attribute_initialization": {
+            "status": "pending",
+            "schema_version": "1.2",
+            "request_id": None,
+            "completed_at": None,
+            "source": None,
+            "error": None,
+            "calibration_summary": "",
+        },
+        "resources": initial_resources(),
+        "dimensions": initial_dimensions(),
         "identity": {},
         "appearance": {},
         "family": {},
@@ -33,27 +46,23 @@ def initial_player_state() -> dict[str, Any]:
         "values": {},
         "school": {
             "house": None,
-            "year_level": 1,
+            "grade": "not_enrolled",
+            "enrollment_started": False,
             "school_year": "1991-1992",
-        },
-        "vitals": {
-            "hp": 100,
-            "max_hp": 100,
-            "mp": 100,
-            "max_mp": 100,
-            "sp": 100,
-            "max_sp": 100,
-            "energy": 100,
-            "satiety": 100,
-            "conditions": [],
+            "grade_started_year": None,
+            "last_grade_promotion_key": None,
+            "last_course_progression_year": None,
+            "term": "summer",
+            "departure_reason": None,
+            "owl_results": {},
+            "newt_results": {},
+            "elective_courses": [],
+            "newt_courses": [],
+            "active_courses": [],
+            "course_selection": None,
+            "course_history": [],
         },
         "statuses": [],
-        "attributes": {
-            "courage": 0,
-            "wisdom": 0,
-            "loyalty": 0,
-            "ambition": 0,
-        },
         "skills": {},
         "magic_talents": [],
         "traits": [],
@@ -63,6 +72,7 @@ def initial_player_state() -> dict[str, Any]:
         "pet": None,
         "current_context": {
             "datetime": "1991-07-01T09:00:00",
+            "current_date": "1991-07-01",
             "period": "morning",
             "location_id": "home",
             "activity": "character_setup",

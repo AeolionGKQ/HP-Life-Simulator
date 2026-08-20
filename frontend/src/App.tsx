@@ -7,6 +7,7 @@ import {
   GitBranch,
   GraduationCap,
   Heart,
+  MagicWand,
   Medal,
   PencilSimple,
   Scroll,
@@ -188,7 +189,11 @@ export function App() {
   }
 
   async function submitSetupAnswer() {
-    if (!selectedSessionId || !setup || !setupAnswer.trim()) return;
+    if (
+      !selectedSessionId ||
+      !setup ||
+      (!setupAnswer.trim() && setup.current_step !== 17)
+    ) return;
     setSetupLoading(true);
     setError("");
     try {
@@ -198,6 +203,15 @@ export function App() {
         setupAnswer.trim(),
       );
       setSetup(next);
+      if (setup.current_step === 1 && next.era_id) {
+        setSessions((current) =>
+          current.map((session) =>
+            session.id === selectedSessionId
+              ? { ...session, era_id: next.era_id }
+              : session,
+          ),
+        );
+      }
       setSetupAnswer("");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "保存角色设定失败");
@@ -222,7 +236,14 @@ export function App() {
       );
       setActiveMenu("剧情");
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "无法确认角色");
+      const message = reason instanceof Error ? reason.message : "初始属性生成失败";
+      try {
+        const latest = await api.setup(selectedSessionId);
+        setSetup(latest);
+        setError(message);
+      } catch {
+        setError(message);
+      }
     } finally {
       setSetupLoading(false);
     }
@@ -463,16 +484,24 @@ export function App() {
               <p className="eyebrow">魔法档案阅览台</p>
               <h2>{activeMenu}</h2>
             </div>
-            <span className="state-pill">{setup?.completed ? "世界线流转中" : "命运尚待书写"}</span>
+            <span className="state-pill">
+              {setup?.completed && setup.attribute_initialization?.status === "ready"
+                ? "世界线流转中"
+                : setup?.completed && setup.attribute_initialization?.status === "failed"
+                  ? "属性校准失败"
+                  : "命运尚待书写"}
+            </span>
           </div>
-          {setup && !setup.completed ? (
+          {setup && (!setup.completed || setup.attribute_initialization?.status !== "ready") ? (
             <div className="setup-panel">
               <span className="setup-progress">
                 第 {setup.current_step} / {setup.steps_total} 步
               </span>
               <h3>{setup.current.title}</h3>
               <p className="muted">{setup.current.description}</p>
-              {setup.current.selection_mode === "confirm" ? (
+              {setupLoading && setup.current.selection_mode === "confirm" ? (
+                <AttributeInitializationLoading />
+              ) : setup.current.selection_mode === "confirm" ? (
                 <SetupSummary answers={setup.answers} eras={eras} />
               ) : (
                 <div className="setup-options">
@@ -502,30 +531,65 @@ export function App() {
                 </div>
               )}
               <div className="setup-input-row">
-                {setup.current_step < 13 ? (
+                {setup.current.selection_mode !== "confirm" ? (
                   <>
-                    {setup.current_step !== 1 && (
-                      <textarea
-                        value={setupAnswer}
-                        onChange={(event) => setSetupAnswer(event.target.value)}
-                        placeholder={
-                          setup.current.selection_mode === "append"
-                            ? "点击预设会追加到这里，也可以继续输入，用逗号分隔"
-                            : "选择上方预设，或输入自定义设定"
-                        }
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
-                            void submitSetupAnswer();
+                    {setup.current_step !== 1 && setup.current_step !== 15 && (
+                      setup.current_step === 4 ? (
+                        <input
+                          aria-label="生日"
+                          inputMode="numeric"
+                          maxLength={10}
+                          pattern="\d{4}-\d{2}-\d{2}"
+                          placeholder="YYYY-MM-DD"
+                          type="text"
+                          value={setupAnswer}
+                          onChange={(event) => setSetupAnswer(event.target.value)}
+                        />
+                      ) : (
+                        <textarea
+                          aria-label={setup.current.title}
+                          value={setupAnswer}
+                          onChange={(event) => setSetupAnswer(event.target.value)}
+                          placeholder={
+                            setup.current.selection_mode === "append"
+                              ? "点击预设会追加到这里，也可以继续输入，用逗号分隔"
+                              : setup.current_step === 2
+                                ? "输入角色姓名"
+                                : setup.current_step === 16
+                                  ? "选择上方预设，或写下你的独特守护神"
+                                  : setup.current_step === 17
+                                    ? "写下任何希望魔法世界记住的角色设定（可留空）"
+                                : "选择上方预设，或输入自定义设定"
                           }
-                        }}
-                      />
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                              void submitSetupAnswer();
+                            }
+                          }}
+                        />
+                      )
                     )}
                     <button
-                      className={setup.current_step === 1 ? "primary-button setup-era-next" : "primary-button"}
-                      disabled={setupLoading || !setupAnswer.trim()}
+                      className={
+                        setup.current_step === 1
+                          ? "primary-button setup-era-next"
+                          : setup.current_step === 15
+                            ? "primary-button setup-single-next"
+                            : "primary-button"
+                      }
+                      disabled={
+                        setupLoading ||
+                        (!setupAnswer.trim() && setup.current_step !== 17)
+                      }
                       onClick={() => void submitSetupAnswer()}
                     >
-                      {setupLoading ? "保存中…" : setup.current_step === 1 ? "以所选世代继续" : "下一步"}
+                      {setupLoading
+                        ? "保存中…"
+                        : setup.current_step === 1
+                          ? "以所选世代继续"
+                          : setup.current_step === 17 && !setupAnswer.trim()
+                            ? "不再补充，继续"
+                            : "下一步"}
                     </button>
                   </>
                 ) : (
@@ -542,7 +606,7 @@ export function App() {
                 当前设定会保存在本地存档中。
                 {setup.current_step === 1
                   ? " 请选择上方一个已开放的世代。"
-                  : setup.current_step < 13 && " 可按 Ctrl + Enter 进入下一步。"}
+                  : setup.current.selection_mode !== "confirm" && " 可按 Ctrl + Enter 进入下一步。"}
               </p>
             </div>
           ) : setup?.completed && selectedSessionId ? (
@@ -668,17 +732,22 @@ function SetupSummary({
 }) {
   const titles: Record<string, string> = {
     "1": "时代",
-    "2": "身份",
-    "3": "外貌与体格",
-    "4": "出身",
-    "5": "童年经历",
-    "6": "性格",
-    "7": "信仰与价值观",
-    "8": "魔杖",
-    "9": "魔法天赋",
-    "10": "宠物",
-    "11": "初始好友",
-    "12": "剧情起点",
+    "2": "姓名",
+    "3": "性别",
+    "4": "生日",
+    "5": "外貌与体格",
+    "6": "出身",
+    "7": "童年经历",
+    "8": "性格",
+    "9": "信仰与价值观",
+    "10": "魔杖",
+    "11": "魔法天赋",
+    "12": "宠物",
+    "13": "初始好友",
+    "14": "剧情起点",
+    "15": "学院",
+    "16": "守护神",
+    "17": "角色补充",
   };
   return (
     <div className="setup-summary">
@@ -688,10 +757,25 @@ function SetupSummary({
           <p>
             {step === "1"
               ? formatEraAnswer(answers[step], eras)
+              : step === "15"
+                ? formatHouseAnswer(answers[step])
               : formatSetupAnswer(answers[step])}
           </p>
         </article>
       ))}
+    </div>
+  );
+}
+
+function AttributeInitializationLoading() {
+  return (
+    <div className="magic-loading attribute-init-loading" role="status" aria-live="polite">
+      <div className="magic-orbit" aria-hidden="true"><MagicWand /></div>
+      <h3>命运正在校准你的魔法回响</h3>
+      <p>
+        学院、出身与天赋的星轨正在交汇，魔法世界正为你测定生命、魔力、精神与五项长期维度……
+      </p>
+      <small>请稍候，属性校准完成后才会开启你的第一幕故事。</small>
     </div>
   );
 }
@@ -712,6 +796,17 @@ function formatSetupAnswer(answer: unknown): string {
       .join("；");
   }
   return String(answer);
+}
+
+function formatHouseAnswer(answer: unknown): string {
+  const houses: Record<string, string> = {
+    gryffindor: "格兰芬多",
+    hufflepuff: "赫奇帕奇",
+    ravenclaw: "拉文克劳",
+    slytherin: "斯莱特林",
+  };
+  const value = String(answer ?? "");
+  return houses[value] ?? "未选择";
 }
 
 function displayMessage(value: unknown, fallback: string): string {

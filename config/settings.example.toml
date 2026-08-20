@@ -14,9 +14,8 @@ echo = false
 base_url = "https://api.example.com"
 api_key = "replace-with-your-api-key"
 model = "your-model-name"
-timeout_seconds = 90
+timeout_seconds = 300
 temperature = 0.8
-max_output_tokens = 4096
 supports_json_schema = false
 stream = false
 

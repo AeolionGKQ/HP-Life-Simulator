@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from backend.app.core.config import get_settings
+from backend.app.core.config import LLMSettings, get_settings
 from backend.app.main import create_app
 from backend.app.providers.openai_compatible import OpenAICompatibleProvider
 
@@ -53,4 +53,47 @@ async def test_llm_connection_formats_object_content(monkeypatch) -> None:
     success, message, _ = await provider.test_connection()
     assert success is True
     assert message == "模型服务连接成功"
+
+
+async def test_chat_completion_omits_max_tokens_by_default(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {"choices": [{"message": {"content": "{}"}}]}
+
+    class FakeClient:
+        def __init__(self, **kwargs: object) -> None:
+            captured["timeout"] = kwargs["timeout"]
+
+        async def __aenter__(self) -> "FakeClient":
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+        async def post(self, endpoint: str, *, headers: dict[str, str], json: dict[str, object]) -> FakeResponse:
+            captured["payload"] = json
+            return FakeResponse()
+
+    monkeypatch.setattr("httpx.AsyncClient", FakeClient)
+    provider = OpenAICompatibleProvider(
+        LLMSettings(
+            base_url="https://example.com",
+            api_key="test-key",
+            model="test-model",
+            timeout_seconds=300,
+        )
+    )
+
+    await provider.chat_completion([{"role": "user", "content": "test"}])
+
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    assert "max_tokens" not in payload
+    timeout = captured["timeout"]
+    assert getattr(timeout, "read") == 300
 

@@ -1,0 +1,164 @@
+from types import SimpleNamespace
+from datetime import date
+
+import pytest
+
+from backend.app.content.attributes import (
+    DIMENSION_IDS,
+    RESOURCE_IDS,
+    initial_dimensions,
+    initial_resources,
+)
+from backend.app.prompts.attributes import build_attribute_initialization_messages
+from backend.app.rules.state import apply_turn_rules
+from backend.app.schemas.game import NarrativeResponse
+
+
+def _response(player_changes: dict) -> NarrativeResponse:
+    return NarrativeResponse.model_validate({
+        "response_type": "narrative",
+        "turn": {
+            "title": "属性测试",
+            "scene_type": "encounter",
+            "narrative": "测试剧情。",
+            "current_date": "1991-07-01",
+            "location_id": "home",
+        },
+        "choices": [
+            {"id": "one", "label": "一", "kind": "action", "risk": "low"},
+            {"id": "two", "label": "二", "kind": "action", "risk": "medium"},
+            {"id": "choice_other", "label": "其他", "kind": "free_text", "risk": "low"},
+        ],
+        "state_proposals": {},
+        "player_changes": player_changes,
+        "worldline": {
+            "offset_rate": 0,
+            "delta": 0,
+            "reason": "无变化",
+            "affected_nodes": [],
+        },
+        "events": [],
+        "memory_update": {},
+        "self_check": {},
+    })
+
+
+def _state() -> dict:
+    return {
+        "resources": initial_resources(),
+        "dimensions": {
+            **initial_dimensions(),
+            "willpower": {"value": 10, "max": 20, "base_max": 20},
+        },
+        "identity": {"age": 11, "birthday": "1980-03-12"},
+        "current_context": {
+            "datetime": "1991-07-01T09:00:00+00:00",
+            "current_date": "1991-07-01",
+        },
+        "lifecycle": {"status": "normal"},
+    }
+
+
+def test_attribute_catalog_is_complete_and_has_no_old_attributes() -> None:
+    assert RESOURCE_IDS == {"health", "mana", "sanity", "energy", "satiety"}
+    assert DIMENSION_IDS == {
+        "constitution",
+        "intelligence",
+        "willpower",
+        "charisma",
+        "magical_power",
+    }
+
+
+def test_resource_and_dimension_rules_clamp_and_audit() -> None:
+    response = _response({
+        "resource_deltas": [{
+            "id": "mana",
+            "delta": -120,
+            "reason_code": "spell_cost",
+            "reason": "施放大型魔法",
+        }],
+        "dimension_deltas": [{
+            "id": "willpower",
+            "delta": 5,
+            "reason_code": "training",
+            "reason": "完成训练",
+        }],
+    })
+    state, changes = apply_turn_rules(_state(), [], response)
+    assert state["resources"]["mana"]["value"] == 0
+    assert state["dimensions"]["willpower"]["value"] == 11
+    assert changes["resources"]["applied"][0]["delta"] == -100
+    assert changes["dimensions"]["applied"][0]["proposed_delta"] == 5
+
+
+def test_health_zero_causes_death_and_sanity_zero_causes_collapse() -> None:
+    death, _ = apply_turn_rules(
+        _state(),
+        [],
+        _response({
+            "resource_deltas": [{
+                "id": "health",
+                "delta": -100,
+                "reason_code": "injury",
+                "reason": "致命伤",
+            }]
+        }),
+    )
+    assert death["lifecycle"]["status"] == "dead"
+
+    collapsed, _ = apply_turn_rules(
+        _state(),
+        [],
+        _response({
+            "resource_deltas": [{
+                "id": "sanity",
+                "delta": -100,
+                "reason_code": "mental_attack",
+                "reason": "精神攻击",
+            }]
+        }),
+    )
+    assert collapsed["lifecycle"]["status"] == "collapsed"
+
+
+def test_story_date_and_location_are_persisted_without_allowing_date_regression() -> None:
+    response = _response({})
+    response.turn.current_date = date(1991, 9, 3)
+    response.turn.location_id = "hogwarts_library"
+    state, changes = apply_turn_rules(_state(), [], response)
+    assert state["current_context"]["current_date"] == "1991-09-03"
+    assert state["current_context"]["location_id"] == "hogwarts_library"
+    assert changes["date"]["after"] == "1991-09-03"
+    assert changes["location_id"] == "hogwarts_library"
+
+    response.turn.current_date = date(1991, 6, 30)
+    state, changes = apply_turn_rules(state, [], response)
+    assert state["current_context"]["current_date"] == "1991-09-03"
+    assert changes["date_rejected"]["reason"] == "story_date_cannot_move_backwards"
+
+
+@pytest.mark.parametrize(
+    "era_id",
+    ["dumbledore_era", "parent_generation", "second_generation", "modern"],
+)
+def test_attribute_initialization_prompt_uses_same_protocol_for_every_era(
+    era_id: str,
+) -> None:
+    messages = build_attribute_initialization_messages(
+        SimpleNamespace(id="session", era_id=era_id),
+        SimpleNamespace(state={
+            "setup": {"answers": {}},
+            "identity": {},
+            "appearance": {},
+            "family": {},
+            "background": {},
+            "personality": {},
+            "values": {},
+            "magic_talents": [],
+        }),
+    )
+    system = messages[0]["content"]
+    assert "四个世代使用完全相同的属性规则" in system
+    assert "resource_deltas" not in system
+    assert "vital_deltas" not in system

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import date
 from hashlib import sha1
 from typing import Any
 
@@ -8,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app.content.setup import get_setup_step
-from backend.app.content.eras import get_era
+from backend.app.content.eras import ERA_BY_ID, get_era
 from backend.app.models import (
     GameSession,
     NPCState,
@@ -18,15 +19,24 @@ from backend.app.models import (
 from backend.app.schemas.game import SetupAnswer, SetupView
 
 
+SETUP_FINAL_STEP = 18
+
+
 def get_setup_view(game_session: GameSession, player_state: PlayerState) -> SetupView:
     state = deepcopy(player_state.state)
     setup = state.setdefault("setup", {})
-    current_step = min(int(setup.get("current_step", 1)), 13)
+    current_step = (
+        SETUP_FINAL_STEP
+        if setup.get("completed")
+        else min(int(setup.get("current_step", 1)), SETUP_FINAL_STEP)
+    )
     return SetupView(
         current_step=current_step,
         completed=bool(setup.get("completed", False)),
         current=get_setup_step(current_step),
         answers=setup.get("answers", {}),
+        era_id=game_session.era_id,
+        attribute_initialization=state.get("attribute_initialization", {}),
     )
 
 
@@ -36,22 +46,32 @@ def save_setup_answer(
     player_state: PlayerState,
     payload: SetupAnswer,
 ) -> SetupView:
-    if payload.step != player_state.state.get("setup", {}).get("current_step", 1):
+    state = deepcopy(player_state.state)
+    setup = state.setdefault("setup", {})
+    if payload.step != setup.get("current_step", 1):
         raise ValueError("只能提交当前角色创建步骤")
     if payload.step == 1:
         selected_era = str(payload.answer)
-        era = get_era(selected_era)
-        if (
-            selected_era != game_session.era_id
-            or not era["available"]
-        ):
+        era = ERA_BY_ID.get(selected_era)
+        if era is None or not era["available"]:
             raise ValueError("当前版本尚未开放所选世代")
+        game_session.era_id = selected_era
+    if payload.step == 4:
+        try:
+            date.fromisoformat(str(payload.answer).strip())
+        except ValueError as exc:
+            raise ValueError("请选择有效的生日日期") from exc
+    if payload.step == 15 and str(payload.answer) not in {
+        "gryffindor",
+        "hufflepuff",
+        "ravenclaw",
+        "slytherin",
+    }:
+        raise ValueError("学院只能从四个学院中选择")
 
-    state = deepcopy(player_state.state)
-    setup = state.setdefault("setup", {})
     answers = setup.setdefault("answers", {})
     answers[str(payload.step)] = payload.answer
-    if payload.step < 13:
+    if payload.step < SETUP_FINAL_STEP:
         setup["current_step"] = payload.step + 1
     player_state.state = state
     db.commit()
@@ -67,18 +87,24 @@ def confirm_setup(
     state = deepcopy(player_state.state)
     setup = state.setdefault("setup", {})
     answers: dict[str, Any] = setup.setdefault("answers", {})
-    missing = [str(step) for step in range(1, 13) if str(step) not in answers]
+    initialization = state.get("attribute_initialization", {})
+    if setup.get("completed") and initialization.get("status") == "ready":
+        return get_setup_view(game_session, player_state)
+    missing = [
+        str(step)
+        for step in range(1, SETUP_FINAL_STEP)
+        if str(step) not in answers
+    ]
     if missing:
         raise ValueError(f"角色创建尚未完成，缺少步骤：{', '.join(missing)}")
     setup["completed"] = True
-    setup["current_step"] = 13
-    _materialize_player_state(state, answers)
-    game_session.status = "active"
-    game_session.state_version += 1
+    setup["current_step"] = SETUP_FINAL_STEP
+    _materialize_player_state(state, answers, game_session.era_id)
+    game_session.status = "initializing"
     player_state.state = state
     _seed_npcs_and_relationships(db, game_session.id)
     db.flush()
-    seed_initial_friends(db, game_session.id, answers.get("11"))
+    seed_initial_friends(db, game_session.id, answers.get("13"))
     db.commit()
     db.refresh(player_state)
     db.refresh(game_session)
@@ -88,41 +114,47 @@ def confirm_setup(
 def _materialize_player_state(
     state: dict[str, Any],
     answers: dict[str, Any],
+    era_id: str,
 ) -> None:
-    identity = answers.get("2", {})
-    if isinstance(identity, str):
-        identity = _parse_labeled_identity(identity)
+    birthday = _normalize_answer(answers.get("4", "1980-09-01"))
+    starting_point = _starting_point_id(answers.get("14"))
+    era = get_era(era_id)
+    era_start_year = int(str(era["years"]).split("–", 1)[0].replace("+", ""))
+    starting_date = date(
+        era_start_year,
+        9 if starting_point == "sorting_ceremony" else 7,
+        1,
+    )
     state["identity"] = {
-        "name": identity.get("name", "未命名巫师"),
-        "gender": identity.get("gender", "未设定"),
-        "birthday": identity.get("birthday", "1980-09-01"),
-        "sexuality": identity.get("sexuality", "未设定"),
-        "age": 10,
+        "name": _normalize_answer(answers.get("2", "未命名巫师")),
+        "gender": _normalize_answer(answers.get("3", "未设定")),
+        "birthday": birthday,
+        "age": _age_on_date(birthday, starting_date),
     }
-    appearance = answers.get("3", {})
+    appearance = answers.get("5", {})
     state["appearance"] = (
         appearance if isinstance(appearance, dict) else {"description": appearance}
     )
-    family = answers.get("4", "未设定")
+    family = answers.get("6", "未设定")
     state["family"] = {
         "bloodline": _normalize_answer(family),
         "description": "你的家族背景将在故事中逐渐展开。",
     }
-    childhood = answers.get("5", "")
+    childhood = answers.get("7", "")
     state["background"] = {
         "childhood_experiences": childhood
         if isinstance(childhood, list)
         else [str(childhood)],
     }
-    personality_values = _split_multi_answer(answers.get("6", "未设定"))
+    personality_values = _split_multi_answer(answers.get("8", "未设定"))
     state["personality"] = {
         "traits": personality_values,
         "primary": personality_values[0] if personality_values else "未设定",
     }
-    values = answers.get("7", "")
+    values = answers.get("9", "")
     state["values"] = {"description": values}
-    state["wand"] = {"description": answers.get("8")}
-    talent_values = _split_multi_answer(answers.get("9", "魔法基础"))
+    state["wand"] = {"description": answers.get("10")}
+    talent_values = _split_multi_answer(answers.get("11", "魔法基础"))
     state["magic_talents"] = [
         {
             "id": _stable_content_id(value),
@@ -134,18 +166,32 @@ def _materialize_player_state(
     state["skills"] = {
         _stable_content_id(value): {
             "name": value,
-            "level": 10,
+            "level": 1,
             "experience": 0,
             "source": "initial_magic_talent",
         }
         for value in talent_values
     }
-    state["pet"] = {"description": answers.get("10")}
-    starting_point = _starting_point_id(answers.get("12"))
+    state["pet"] = {"description": answers.get("12")}
+    state["patronus"] = {
+        "form": _normalize_answer(answers.get("16", "未设定")),
+        "status": "潜在守护神形态",
+        "summoning_requirement": "仅在技能中已掌握【呼神护卫】后才可召唤",
+    }
+    state["character_notes"] = {
+        "description": _normalize_answer(answers.get("17", "")).strip(),
+    }
     state["current_context"] = {
-        "datetime": "1991-09-01T17:30:00+00:00"
-        if starting_point == "sorting_ceremony"
-        else "1991-07-01T09:00:00+00:00",
+        "datetime": (
+            f"{era_start_year:04d}-09-01T17:30:00+00:00"
+            if starting_point == "sorting_ceremony"
+            else f"{era_start_year:04d}-07-01T09:00:00+00:00"
+        ),
+        "current_date": (
+            f"{era_start_year:04d}-09-01"
+            if starting_point == "sorting_ceremony"
+            else f"{era_start_year:04d}-07-01"
+        ),
         "period": "evening" if starting_point == "sorting_ceremony" else "morning",
         "location_id": {
             "before_first_letter": "home",
@@ -155,14 +201,36 @@ def _materialize_player_state(
         }.get(starting_point, "home"),
         "activity": starting_point,
     }
-    state["school"]["year_level"] = 1
-    state["school"]["school_year"] = "1991-1992"
+    school = state.setdefault("school", {})
+    school["grade"] = "not_enrolled"
+    school["enrollment_started"] = False
+    state["school"]["school_year"] = f"{era_start_year}-{era_start_year + 1}"
+    school["grade_started_year"] = None
+    school["last_grade_promotion_key"] = None
+    school["last_course_progression_year"] = None
+    school["term"] = "autumn" if starting_point == "sorting_ceremony" else "summer"
+    school["newt_courses"] = []
+    school["course_selection"] = None
+    school["course_history"] = []
+    school["active_courses"] = []
+    school["elective_courses"] = []
+    school["owl_results"] = {}
+    school["newt_results"] = {}
+    state["school"]["house"] = _normalize_answer(answers.get("15", "未分院"))
 
 
 def _normalize_answer(value: Any) -> str:
     if isinstance(value, dict):
         return str(value.get("id") or value.get("label") or value)
     return str(value)
+
+
+def _age_on_date(birthday: str, current_date: date) -> int:
+    birth_date = date.fromisoformat(birthday)
+    age = current_date.year - birth_date.year
+    if (current_date.month, current_date.day) < (birth_date.month, birth_date.day):
+        age -= 1
+    return max(0, age)
 
 
 def _split_multi_answer(value: Any) -> list[str]:
@@ -187,28 +255,6 @@ def _stable_content_id(value: str) -> str:
         .replace("：", "_")
         .replace(":", "_")
     )
-
-
-def _parse_labeled_identity(value: str) -> dict[str, str]:
-    result: dict[str, str] = {}
-    labels = {
-        "姓名": "name",
-        "性别": "gender",
-        "生日": "birthday",
-        "性取向": "sexuality",
-    }
-    for segment in value.replace("，", ",").split(","):
-        segment = segment.strip()
-        matched = False
-        for label, key in labels.items():
-            prefix_options = (f"{label}:", f"{label}：")
-            if segment.startswith(prefix_options):
-                result[key] = segment.split(":", 1)[-1].split("：", 1)[-1].strip()
-                matched = True
-                break
-        if not matched and segment and "name" not in result:
-            result["name"] = segment
-    return result
 
 
 def _starting_point_id(value: Any) -> str:

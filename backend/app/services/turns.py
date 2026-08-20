@@ -119,7 +119,7 @@ def _parse_response(
             id="choice_other",
             label="其他",
             kind="free_text",
-            risk="unknown",
+            risk="low",
         )
     ]
     return response
@@ -145,7 +145,8 @@ def _normalize_narrative_payload(
                     or scene
                     or "故事继续向前展开。"
                 ),
-                "location_id": normalized.get("location_id"),
+                "current_date": normalized.get("current_date") or normalized.get("date"),
+                "location_id": normalized.get("location_id") or "unknown",
                 "time_advance_minutes": int(
                     normalized.get("time_advance_minutes")
                     or normalized.get("time_advance")
@@ -164,6 +165,13 @@ def _normalize_narrative_payload(
             or ""
         ),
     )
+    if "current_date" not in turn:
+        turn["current_date"] = (
+            turn.get("date")
+            or normalized.get("current_date")
+            or normalized.get("date")
+        )
+    turn.setdefault("location_id", normalized.get("location_id") or "unknown")
     if "time_advance_minutes" not in turn:
         turn["time_advance_minutes"] = int(
             turn.get("time_advance") or normalized.get("time_advance") or 0
@@ -181,9 +189,10 @@ def _normalize_narrative_payload(
                 or choice.get("id")
                 or "继续",
             ),
-                "kind": choice.get("kind") or (
+            "kind": choice.get("kind") or (
                 "free_text" if str(choice.get("id", "")).lower() in {"other", "choice_other"} else "action"
                 ),
+            "risk": _normalize_choice_risk(choice.get("risk")),
             "effects": _normalize_choice_effects(
                 choice.get("effects") or choice.get("potential_changes")
             ),
@@ -216,6 +225,19 @@ def _normalize_narrative_payload(
     normalized.setdefault("events", [])
     normalized.setdefault("self_check", {})
     return normalized
+
+
+def _normalize_choice_risk(value: Any) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip().lower()
+    aliases = {
+        "低": "low",
+        "中": "medium",
+        "高": "high",
+        "致命": "fatal",
+    }
+    return aliases.get(normalized, normalized)
 
 
 def _normalize_choice_effects(raw_effects: Any) -> dict[str, Any]:
@@ -322,7 +344,10 @@ async def generate_turn(
     payload: ActionRequest,
 ) -> TurnResponse:
     settings = get_settings()
-    if game_session.status != "active":
+    initialization_status = player_state.state.get(
+        "attribute_initialization", {}
+    ).get("status")
+    if game_session.status != "active" or initialization_status != "ready":
         raise HTTPException(status_code=409, detail="当前存档尚未进入可行动状态")
 
     existing = db.scalar(
@@ -341,6 +366,9 @@ async def generate_turn(
         )
     if game_session.state_version != payload.expected_state_version:
         raise HTTPException(status_code=409, detail="存档已发生变化，请刷新后重试")
+    course_selection = player_state.state.get("school", {}).get("course_selection")
+    if isinstance(course_selection, dict) and course_selection.get("status") == "pending":
+        raise HTTPException(status_code=409, detail="请先完成当前学年的课程选择")
 
     npcs = list(
         db.scalars(select(NPCState).where(NPCState.session_id == game_session.id))
@@ -450,6 +478,9 @@ async def generate_turn(
         response,
     )
     state["worldline"] = response.worldline.model_dump()
+    lifecycle_status = state.get("lifecycle", {}).get("status")
+    if lifecycle_status == "dead":
+        game_session.status = "ended"
     player_state.state = state
     visible_changes = _visible_changes(authoritative_changes)
     response.applied_changes = PlayerChanges.model_validate(visible_changes)
@@ -471,7 +502,7 @@ async def generate_turn(
         action=action,
         response_type=response.response_type,
         narrative=response.turn.narrative,
-        llm_response=response.model_dump(),
+        llm_response=response.model_dump(mode="json"),
         proposed_changes=response.state_proposals,
         authoritative_changes={
             **authoritative_changes,
@@ -531,10 +562,33 @@ def _visible_changes(changes: dict[str, Any]) -> dict[str, Any]:
         ],
         "skill_remove": skill_entries.get("removed", []),
         "skill_deltas": changes.get("skills", {}),
+        "skill_experience_deltas": {
+            item["skill_id"]: item["gained"]
+            for item in changes.get("skill_experience", {}).get("applied", [])
+        },
+        "course_skill_deltas": changes.get("course_skills", {}).get("applied", {}),
         "trait_add": traits.get("added", []),
         "trait_remove": traits.get("removed", []),
-        "vital_deltas": changes.get("vitals", {}),
-        "attribute_deltas": changes.get("attributes", {}),
+        "resource_deltas": [
+            {
+                "id": item["id"],
+                "delta": item["delta"],
+                "reason_code": item["reason_code"],
+                "reason": item["reason"],
+            }
+            for item in changes.get("resources", {}).get("applied", [])
+        ],
+        "dimension_deltas": [
+            {
+                "id": item["id"],
+                "delta": item["delta"],
+                "reason_code": item["reason_code"],
+                "reason": item["reason"],
+            }
+            for item in changes.get("dimensions", {}).get("applied", [])
+        ],
+        "resource_cap_deltas": changes.get("resource_caps", {}).get("applied", []),
+        "dimension_cap_deltas": changes.get("dimension_caps", {}).get("applied", []),
         "reputation_deltas": changes.get("reputation", {}),
         "relationship_deltas": changes.get("relationships", []),
     }
@@ -629,7 +683,7 @@ def _persist_memory_update(
             summary=str(proposed["summary"]),
             event_type=str(proposed.get("event_type") or "important_event"),
             status=str(proposed.get("status") or "open"),
-            importance=max(1, min(10, int(proposed.get("importance", 5)))),
+            importance=_normalize_memory_importance(proposed.get("importance", 5)),
             time_text=proposed.get("time"),
             location_id=proposed.get("location_id"),
             actors=proposed.get("actors") or [],
@@ -641,6 +695,41 @@ def _persist_memory_update(
             related_data=proposed.get("related_data") or {},
         )
     )
+
+
+def _normalize_memory_importance(value: Any) -> int:
+    """将不可信的模型输出归一化为 1 到 10 的长期记忆重要度。"""
+    if isinstance(value, bool):
+        return 5
+    if isinstance(value, (int, float)):
+        try:
+            numeric = int(value)
+        except (OverflowError, ValueError):
+            return 5
+        return max(1, min(10, numeric))
+
+    normalized = str(value or "").strip().lower()
+    aliases = {
+        "minor": 2,
+        "low": 3,
+        "medium": 5,
+        "moderate": 5,
+        "major": 8,
+        "high": 8,
+        "critical": 10,
+        "次要": 2,
+        "低": 3,
+        "中": 5,
+        "重要": 8,
+        "高": 8,
+        "关键": 10,
+    }
+    if normalized in aliases:
+        return aliases[normalized]
+    try:
+        return max(1, min(10, int(float(normalized))))
+    except (OverflowError, ValueError):
+        return 5
 
 
 def _limit_recent_turns(

@@ -38,9 +38,8 @@ class LLMSettings(BaseModel):
     base_url: str
     api_key: SecretStr
     model: str
-    timeout_seconds: float = Field(default=90, gt=0)
+    timeout_seconds: float = Field(default=300, gt=0)
     temperature: float = Field(default=0.8, ge=0, le=2)
-    max_output_tokens: int = Field(default=4096, gt=0)
     supports_json_schema: bool = False
     stream: bool = False
 

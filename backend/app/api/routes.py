@@ -23,6 +23,8 @@ from backend.app.schemas.sessions import (
 )
 from backend.app.schemas.game import (
     ActionRequest,
+    CourseSelectionRequest,
+    CourseView,
     JournalRead,
     MemoryRead,
     NPCRead,
@@ -52,6 +54,11 @@ from backend.app.services.setup import (
     save_setup_answer,
 )
 from backend.app.services.turns import TurnGenerationError, generate_turn
+from backend.app.services.courses import get_courses_view, select_courses
+from backend.app.services.attributes import (
+    AttributeInitializationError,
+    initialize_attributes,
+)
 
 router = APIRouter(prefix="/api")
 
@@ -102,7 +109,6 @@ async def test_llm_connection(
             model=payload.model,
             timeout_seconds=settings.llm.timeout_seconds,
             temperature=settings.llm.temperature,
-            max_output_tokens=settings.llm.max_output_tokens,
             supports_json_schema=settings.llm.supports_json_schema,
             stream=False,
         )
@@ -190,6 +196,37 @@ def get_game_state(
         state_version=game_session.state_version,
         state=player_state.state,
     )
+
+
+@router.get("/sessions/{session_id}/courses", response_model=CourseView)
+def get_game_courses(
+    session_id: str,
+    db: Session = Depends(get_db),
+) -> CourseView:
+    game_session = _require_session(db, session_id)
+    player_state = get_player_state(db, session_id)
+    if player_state is None:
+        raise HTTPException(status_code=404, detail="角色状态不存在")
+    return get_courses_view(game_session, player_state)
+
+
+@router.put("/sessions/{session_id}/courses", response_model=CourseView)
+def update_game_courses(
+    session_id: str,
+    payload: CourseSelectionRequest,
+    db: Session = Depends(get_db),
+) -> CourseView:
+    game_session = _require_session(db, session_id)
+    player_state = get_player_state(db, session_id)
+    if player_state is None:
+        raise HTTPException(status_code=404, detail="角色状态不存在")
+    try:
+        return select_courses(db, game_session, player_state, payload)
+    except ValueError as exc:
+        db.rollback()
+        detail = str(exc)
+        status_code = 409 if "版本" in detail or "变化" in detail else 422
+        raise HTTPException(status_code=status_code, detail=detail) from exc
 
 
 @router.get("/sessions/{session_id}/journal", response_model=list[JournalRead])
@@ -345,7 +382,7 @@ def answer_game_setup(
 
 
 @router.post("/sessions/{session_id}/setup/confirm", response_model=SetupView)
-def confirm_game_setup(
+async def confirm_game_setup(
     session_id: str,
     _: SetupConfirm,
     db: Session = Depends(get_db),
@@ -355,9 +392,40 @@ def confirm_game_setup(
     if game_session is None or player_state is None:
         raise HTTPException(status_code=404, detail="存档不存在")
     try:
-        return confirm_setup(db, game_session, player_state)
+        setup_view = confirm_setup(db, game_session, player_state)
+        initialized_state = await initialize_attributes(db, game_session, player_state)
+        return setup_view.model_copy(
+            update={
+                "attribute_initialization": initialized_state["attribute_initialization"]
+            }
+        )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except AttributeInitializationError as exc:
+        db.rollback()
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post(
+    "/sessions/{session_id}/attributes/initialize",
+    response_model=SetupView,
+)
+async def initialize_game_attributes(
+    session_id: str,
+    db: Session = Depends(get_db),
+) -> SetupView:
+    game_session = get_session(db, session_id)
+    player_state = get_player_state(db, session_id)
+    if game_session is None or player_state is None:
+        raise HTTPException(status_code=404, detail="存档不存在")
+    if not player_state.state.get("setup", {}).get("completed"):
+        raise HTTPException(status_code=409, detail="角色创建尚未完成")
+    try:
+        await initialize_attributes(db, game_session, player_state)
+        return get_setup_view(game_session, player_state)
+    except AttributeInitializationError as exc:
+        db.rollback()
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @router.post("/sessions/{session_id}/actions", response_model=TurnResponse)

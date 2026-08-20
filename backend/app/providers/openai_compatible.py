@@ -27,7 +27,6 @@ class OpenAICompatibleProvider:
         self,
         messages: list[dict[str, str]],
         *,
-        max_tokens: int | None = None,
         temperature: float | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -36,7 +35,6 @@ class OpenAICompatibleProvider:
             "temperature": (
                 self.settings.temperature if temperature is None else temperature
             ),
-            "max_tokens": max_tokens or self.settings.max_output_tokens,
             "stream": False,
         }
         if self.settings.supports_json_schema:
@@ -62,7 +60,6 @@ class OpenAICompatibleProvider:
                     },
                     {"role": "user", "content": "连接测试"},
                 ],
-                max_tokens=8,
                 temperature=0,
             )
             raw_content = (

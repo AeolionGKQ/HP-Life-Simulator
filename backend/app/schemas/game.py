@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from datetime import date
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class SetupOption(BaseModel):
@@ -16,7 +17,7 @@ class SetupOption(BaseModel):
 
 
 class SetupStep(BaseModel):
-    step: int = Field(ge=1, le=13)
+    step: int = Field(ge=1, le=18)
     title: str
     description: str
     options: list[SetupOption] = []
@@ -26,18 +27,90 @@ class SetupStep(BaseModel):
 class SetupView(BaseModel):
     current_step: int
     completed: bool
-    steps_total: int = 13
+    steps_total: int = 18
+    era_id: str = ""
     current: SetupStep
     answers: dict[str, Any]
+    attribute_initialization: dict[str, Any] = {}
 
 
 class SetupAnswer(BaseModel):
-    step: int = Field(ge=1, le=13)
+    step: int = Field(ge=1, le=17)
     answer: Any
 
 
 class SetupConfirm(BaseModel):
     confirmed: bool = True
+
+
+RESOURCE_ID = Literal["health", "mana", "sanity", "energy", "satiety"]
+DIMENSION_ID = Literal[
+    "constitution",
+    "intelligence",
+    "willpower",
+    "charisma",
+    "magical_power",
+]
+
+
+class ResourceDelta(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: RESOURCE_ID
+    delta: float
+    reason_code: str = Field(min_length=1, max_length=80)
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class DimensionDelta(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: DIMENSION_ID
+    delta: float
+    reason_code: str = Field(min_length=1, max_length=80)
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class ResourceCapDelta(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: RESOURCE_ID
+    delta: float
+    reason_code: str = Field(min_length=1, max_length=80)
+    reason: str = Field(min_length=1, max_length=500)
+    permanent: bool = True
+
+
+class DimensionCapDelta(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: DIMENSION_ID
+    delta: float
+    reason_code: str = Field(min_length=1, max_length=80)
+    reason: str = Field(min_length=1, max_length=500)
+    permanent: bool = True
+
+
+class InitialResource(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: RESOURCE_ID
+    value: float
+    max: float
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class InitialDimension(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: DIMENSION_ID
+    value: float
+    max: float
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class AttributeInitializationResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    response_type: Literal["attribute_initialization"]
+    schema_version: Literal["1.2"]
+    resources: list[InitialResource]
+    dimensions: list[InitialDimension]
+    calibration_summary: str = ""
+    self_check: dict[str, Any] = {}
 
 
 class TraitEntry(BaseModel):
@@ -52,7 +125,17 @@ class TraitEntry(BaseModel):
 class ChoiceEffect(BaseModel):
     id: str = ""
     name: str
-    type: Literal["item", "status", "skill", "trait", "attribute", "relationship"]
+    type: Literal[
+        "item",
+        "status",
+        "skill",
+        "trait",
+        "resource",
+        "dimension",
+        "resource_cap",
+        "dimension_cap",
+        "relationship",
+    ]
     direction: Literal["gain", "loss", "change"]
     description: str = ""
 
@@ -64,6 +147,7 @@ class ChoiceEffects(BaseModel):
 
 
 class PlayerChanges(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     inventory_add: list[dict[str, Any]] = []
     inventory_remove: list[str] = []
     status_add: list[dict[str, Any]] = []
@@ -71,19 +155,55 @@ class PlayerChanges(BaseModel):
     skill_add: list[dict[str, Any]] = []
     skill_remove: list[str] = []
     skill_deltas: dict[str, int] = {}
+    skill_experience_deltas: dict[str, int] = {}
+    course_skill_deltas: dict[str, int] = {}
     trait_add: list[TraitEntry] = []
     trait_remove: list[str] = []
-    vital_deltas: dict[str, float] = {}
-    attribute_deltas: dict[str, float] = {}
+    resource_deltas: list[ResourceDelta] = []
+    dimension_deltas: list[DimensionDelta] = []
+    resource_cap_deltas: list[ResourceCapDelta] = []
+    dimension_cap_deltas: list[DimensionCapDelta] = []
     reputation_deltas: dict[str, int] = {}
     relationship_deltas: list[dict[str, Any]] = []
+
+
+GRADE_ID = Literal[
+    "not_enrolled",
+    "year_1",
+    "year_2",
+    "year_3",
+    "year_4",
+    "year_5",
+    "year_6",
+    "year_7",
+    "left_school",
+]
+
+
+class SchoolTransition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["enrollment", "promotion", "departure"]
+    from_grade: GRADE_ID
+    to_grade: GRADE_ID
+    reason: Literal[
+        "sorting_completed",
+        "new_school_year_started",
+        "graduated_after_newts",
+        "left_after_owls",
+        "dropout",
+        "expelled",
+        "medical_departure",
+        "other_permanent_departure",
+    ]
+    evidence: str = Field(min_length=1, max_length=500)
 
 
 class Choice(BaseModel):
     id: str
     label: str
     kind: str = "action"
-    risk: str = "unknown"
+    risk: Literal["low", "medium", "high", "fatal"]
     requires: list[str] = []
     effects_hint: str = ""
     effects: ChoiceEffects = ChoiceEffects()
@@ -96,18 +216,46 @@ class WorldlineResponse(BaseModel):
     affected_nodes: list[str] = []
 
 
+class LongTermMemoryProposal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    memory_id: str | None = None
+    title: str = ""
+    summary: str = Field(min_length=1)
+    event_type: str = "important_event"
+    status: str = "open"
+    importance: int = Field(default=5, ge=1, le=10, strict=True)
+    time: str | None = None
+    location_id: str | None = None
+    actors: list[str] = []
+    keywords: list[str] = []
+    facts: list[str] = []
+    open_threads: list[str] = []
+    resolved_threads: list[str] = []
+    related_data: dict[str, Any] = {}
+
+
 class MemoryUpdate(BaseModel):
     summary: str = ""
     create_long_term_memory: bool = False
-    memory: dict[str, Any] | None = None
+    memory: LongTermMemoryProposal | None = None
     resolved_memory_ids: list[str] = []
+
+    @model_validator(mode="after")
+    def require_memory_when_creating(self) -> MemoryUpdate:
+        if self.create_long_term_memory and self.memory is None:
+            raise ValueError("创建长期记忆时 memory 不能为空")
+        return self
 
 
 class NarrativeTurn(BaseModel):
     title: str
     scene_type: str = "dialogue"
     narrative: str
-    location_id: str | None = None
+    current_date: date
+    location_id: str
+    grade: GRADE_ID | None = None
+    school_transition: SchoolTransition | None = None
     time_advance_minutes: int = Field(default=0, ge=0)
 
 
@@ -149,6 +297,75 @@ class PlayerStateResponse(BaseModel):
     session_id: str
     state_version: int
     state: dict[str, Any]
+
+
+class CourseOption(BaseModel):
+    id: str
+    name: str
+    description: str
+    category: str
+    available: bool
+    unavailable_reason: str | None = None
+    skill_id: str
+    skill_level: int = Field(ge=0, le=10)
+
+
+class CourseSkill(BaseModel):
+    id: str
+    name: str
+    description: str = ""
+    level: int = Field(ge=0, le=10)
+    experience: int = Field(default=0, ge=0, le=100)
+    source: str = "course"
+    course_id: str
+
+
+class CourseSelection(BaseModel):
+    status: Literal["pending", "completed"] | None = None
+    phase: Literal["elective", "newt"] | None = None
+    min_courses: int = Field(default=0, ge=0)
+    max_courses: int = Field(default=0, ge=0)
+    available_course_ids: list[str] = []
+
+
+class CourseResult(BaseModel):
+    id: str
+    name: str
+    grade: str
+
+
+class CourseHistoryEntry(BaseModel):
+    school_year: str
+    grade: GRADE_ID
+    active_courses: list[str] = []
+    selected_courses: list[str] = []
+    skill_progression: dict[str, int] = {}
+
+
+class CourseView(BaseModel):
+    session_id: str
+    state_version: int
+    grade: GRADE_ID
+    school_year: str
+    term: str
+    active_courses: list[CourseOption]
+    selection_options: list[CourseOption] = []
+    editable_phase: Literal["elective", "newt"] | None = None
+    elective_courses: list[str]
+    newt_courses: list[str]
+    skills: list[CourseSkill]
+    owl_results: list[CourseResult] = []
+    newt_results: list[CourseResult] = []
+    course_selection: CourseSelection | None = None
+    course_history: list[CourseHistoryEntry] = []
+
+
+class CourseSelectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_state_version: int = Field(ge=0)
+    selection_phase: Literal["elective", "newt"]
+    course_ids: list[str] = Field(min_length=1, max_length=5)
 
 
 class JournalRead(BaseModel):

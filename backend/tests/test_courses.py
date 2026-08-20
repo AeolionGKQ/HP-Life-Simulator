@@ -1,0 +1,303 @@
+from datetime import date
+
+from sqlalchemy import select
+
+from backend.app.content.courses import (
+    COURSE_CATALOG,
+    FIRST_YEAR_REQUIRED_COURSE_IDS,
+)
+from backend.app.db.session import get_session_factory
+from backend.app.main import create_app
+from backend.app.models import GameSession, PlayerState, TurnRecord
+from backend.app.rules.state import apply_turn_rules
+from backend.app.schemas.game import NarrativeResponse
+from backend.app.services.courses import get_courses_view
+from fastapi.testclient import TestClient
+
+
+def _response(
+    current_date: str,
+    *,
+    grade: str | None = None,
+    transition: dict | None = None,
+    player_changes: dict | None = None,
+) -> NarrativeResponse:
+    return NarrativeResponse.model_validate(
+        {
+            "response_type": "narrative",
+            "turn": {
+                "title": "课程测试",
+                "narrative": "测试剧情。",
+                "current_date": current_date,
+                "location_id": "hogwarts",
+                "grade": grade,
+                "school_transition": transition,
+            },
+            "choices": [],
+            "player_changes": player_changes or {},
+            "worldline": {"offset_rate": 0},
+        }
+    )
+
+
+def _enrolled_state() -> dict:
+    return {
+        "school": {
+            "grade": "year_1",
+            "house": "gryffindor",
+            "enrollment_started": True,
+            "school_year": "1991-1992",
+            "grade_started_year": 1991,
+            "last_grade_promotion_key": None,
+            "last_course_progression_year": None,
+            "term": "autumn",
+            "active_courses": list(FIRST_YEAR_REQUIRED_COURSE_IDS),
+            "elective_courses": [],
+            "newt_courses": [],
+            "course_selection": None,
+            "course_history": [],
+        },
+        "skills": {
+            course_id: {
+                "id": course_id,
+                "name": COURSE_CATALOG[course_id]["name"],
+                "level": 0,
+                "experience": 0,
+                "source": "course",
+                "course_id": course_id,
+                "course_skill": True,
+            }
+            for course_id in FIRST_YEAR_REQUIRED_COURSE_IDS
+        },
+        "current_context": {
+            "datetime": "1991-09-01T09:00:00+00:00",
+            "current_date": "1991-09-01",
+            "location_id": "hogwarts",
+        },
+        "identity": {},
+    }
+
+
+def test_enrollment_creates_first_year_courses_and_zero_level_skills() -> None:
+    state = _enrolled_state()
+    state["school"]["grade"] = "not_enrolled"
+    state["school"]["enrollment_started"] = False
+    state["school"]["active_courses"] = []
+    state["skills"] = {}
+    next_state, changes = apply_turn_rules(
+        state,
+        [],
+        _response(
+            "1991-09-01",
+            grade="year_1",
+            transition={
+                "type": "enrollment",
+                "from_grade": "not_enrolled",
+                "to_grade": "year_1",
+                "reason": "sorting_completed",
+                "evidence": "分院仪式完成",
+            },
+        ),
+    )
+    assert next_state["school"]["active_courses"] == list(FIRST_YEAR_REQUIRED_COURSE_IDS)
+    assert all(
+        next_state["skills"][course_id]["level"] == 0
+        for course_id in FIRST_YEAR_REQUIRED_COURSE_IDS
+    )
+    assert "school_grade" in changes
+
+
+def test_june_progression_is_idempotent_and_does_not_change_grade() -> None:
+    state = _enrolled_state()
+    progressed, changes = apply_turn_rules(
+        state,
+        [],
+        _response("1992-06-01", grade="year_1"),
+    )
+    repeated, repeated_changes = apply_turn_rules(
+        progressed,
+        [],
+        _response("1992-06-02", grade="year_1"),
+    )
+    assert progressed["school"]["grade"] == "year_1"
+    assert progressed["skills"]["charms"]["level"] == 1
+    assert changes["course_skills"]["applied"]["charms"] == 1
+    assert repeated["skills"]["charms"]["level"] == 1
+    assert "course_skills" not in repeated_changes
+
+
+def test_september_promotion_is_idempotent_and_opens_elective_selection() -> None:
+    state = _enrolled_state()
+    state["school"]["grade"] = "year_2"
+    state["school"]["grade_started_year"] = 1991
+    state["school"]["active_courses"] = [
+        course_id for course_id in FIRST_YEAR_REQUIRED_COURSE_IDS
+        if course_id != "flying"
+    ]
+    promoted, changes = apply_turn_rules(
+        state,
+        [],
+        _response("1993-09-01", grade="year_3"),
+    )
+    assert promoted["school"]["grade"] == "year_3"
+    assert promoted["school"]["last_grade_promotion_key"] == "year_2:year_3:1993"
+    assert promoted["school"]["course_selection"]["phase"] == "elective"
+    assert changes["school_grade"]["reason"] == "new_school_year_started"
+
+    repeated, repeated_changes = apply_turn_rules(
+        promoted,
+        [],
+        _response("1993-09-02", grade="year_3"),
+    )
+    assert repeated["school"]["grade"] == "year_3"
+    assert repeated["school"]["course_selection"]["phase"] == "elective"
+    assert "school_grade" not in repeated_changes
+
+
+def test_model_cannot_create_course_skill_but_can_clamp_regular_skill() -> None:
+    state = _enrolled_state()
+    next_state, changes = apply_turn_rules(
+        state,
+        [],
+        _response(
+            "1991-09-02",
+            grade="year_1",
+            player_changes={
+                "skill_add": [
+                    {
+                        "id": "potions",
+                        "name": "魔药",
+                        "description": "不应由模型创建",
+                        "level": 10,
+                    },
+                    {
+                        "id": "wandless_magic",
+                        "name": "无杖魔法",
+                        "description": "普通技能",
+                        "level": 99,
+                    },
+                ],
+                "skill_deltas": {"charms": 99, "wandless_magic": 99},
+            },
+        ),
+    )
+    assert "potions" not in changes["skills_entries"]["added"]
+    assert next_state["skills"]["charms"]["level"] == 10
+    assert next_state["skills"]["wandless_magic"]["level"] == 10
+    assert next_state["skills"]["potions"]["level"] == 0
+
+
+def test_skill_experience_accumulates_and_levels_up_alongside_direct_growth() -> None:
+    state = _enrolled_state()
+    state["skills"]["charms"]["level"] = 2
+    state["skills"]["charms"]["experience"] = 90
+    next_state, changes = apply_turn_rules(
+        state,
+        [],
+        _response(
+            "1991-09-02",
+            grade="year_1",
+            player_changes={
+                "skill_deltas": {"charms": 1},
+                "skill_experience_deltas": {"charms": 15},
+            },
+        ),
+    )
+    assert next_state["skills"]["charms"]["level"] == 4
+    assert next_state["skills"]["charms"]["experience"] == 0
+    assert changes["skills"]["charms"] == 2
+    experience_change = changes["skill_experience"]["applied"][0]
+    assert experience_change["experience_before"] == 90
+    assert experience_change["experience_after"] == 0
+    assert experience_change["leveled_up"] is True
+    assert experience_change["overflow_discarded"] == 5
+
+
+def test_skill_experience_only_increases_existing_non_maxed_skills() -> None:
+    state = _enrolled_state()
+    state["skills"]["charms"]["level"] = 10
+    state["skills"]["potions"]["experience"] = 20
+    next_state, changes = apply_turn_rules(
+        state,
+        [],
+        _response(
+            "1991-09-02",
+            grade="year_1",
+            player_changes={
+                "skill_experience_deltas": {
+                    "charms": 10,
+                    "potions": -5,
+                    "unknown_skill": 30,
+                    "herbology": 25,
+                },
+            },
+        ),
+    )
+    assert next_state["skills"]["charms"]["experience"] == 0
+    assert next_state["skills"]["potions"]["experience"] == 20
+    assert next_state["skills"]["herbology"]["experience"] == 25
+    assert "unknown_skill" not in next_state["skills"]
+    rejected_reasons = {
+        item["reason"] for item in changes["skill_experience"]["rejected"]
+    }
+    assert rejected_reasons == {
+        "skill_already_at_max_level",
+        "experience_only_increases",
+        "skill_not_learned",
+    }
+
+
+def test_course_api_writes_selection_without_turn_record() -> None:
+    app = create_app()
+    with get_session_factory()() as db:
+        game_session = GameSession(name="课程 API 测试", era_id="second_generation")
+        db.add(game_session)
+        db.flush()
+        player_state = PlayerState(session_id=game_session.id, state=_enrolled_state())
+        player_state.state["school"]["grade"] = "year_3"
+        player_state.state["school"]["course_selection"] = {
+            "status": "pending",
+            "phase": "elective",
+            "min_courses": 2,
+            "max_courses": 3,
+            "available_course_ids": [
+                "arithmancy",
+                "muggle_studies",
+                "divination",
+                "ancient_runes",
+                "care_of_magical_creatures",
+            ],
+        }
+        db.add(player_state)
+        db.commit()
+        session_id = game_session.id
+        state_version = game_session.state_version
+
+    with TestClient(app) as client:
+        view = client.get(f"/api/sessions/{session_id}/courses")
+        assert view.status_code == 200
+        assert view.json()["course_selection"]["status"] == "pending"
+        selected = client.put(
+            f"/api/sessions/{session_id}/courses",
+            json={
+                "expected_state_version": state_version,
+                "selection_phase": "elective",
+                "course_ids": ["arithmancy", "ancient_runes"],
+            },
+        )
+        assert selected.status_code == 200, selected.text
+        assert selected.json()["course_selection"] is None
+        assert selected.json()["state_version"] == state_version + 1
+
+    with get_session_factory()() as db:
+        persisted = db.scalar(
+            select(PlayerState).where(PlayerState.session_id == session_id)
+        )
+        assert persisted is not None
+        assert persisted.state["skills"]["arithmancy"]["level"] == 0
+        assert db.scalar(
+            select(TurnRecord).where(TurnRecord.session_id == session_id)
+        ) is None
+        db.delete(db.get(GameSession, session_id))
+        db.delete(persisted)
+        db.commit()

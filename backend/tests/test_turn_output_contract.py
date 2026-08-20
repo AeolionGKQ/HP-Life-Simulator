@@ -1,14 +1,24 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from backend.app.prompts.turn import build_turn_messages
-from backend.app.schemas.game import MemoryRequest, NarrativeResponse
-from backend.app.services.turns import _request_response
+from backend.app.schemas.game import (
+    Choice,
+    LongTermMemoryProposal,
+    MemoryRequest,
+    NarrativeResponse,
+)
+from backend.app.services.turns import (
+    _normalize_memory_importance,
+    _request_response,
+)
 
 
 def _extract_json_template(system_prompt: str, name: str) -> dict[str, Any]:
@@ -54,6 +64,55 @@ def test_turn_system_prompt_contains_parseable_response_templates() -> None:
     assert "不得省略必填字段" in system_prompt
     assert "禁止使用单引号、注释、尾随逗号、NaN 或 undefined" in system_prompt
     assert "模板边界标记不得输出" in system_prompt
+    assert "resource_deltas" in system_prompt
+    assert "dimension_deltas" in system_prompt
+    assert "skill_experience_deltas" in system_prompt
+    assert "经验达到 100 后，由程序自动将技能等级提升 1 并把经验清零" in system_prompt
+    assert "current_date" in system_prompt
+    assert "location_id" in system_prompt
+    assert "不是必然成功" in system_prompt
+    assert "奥利凡德魔杖店" in system_prompt
+    assert "分院" in system_prompt
+    assert "low、medium、high、fatal" in system_prompt
+    assert "被朋友讨厌" in system_prompt
+    assert "考试不及格" in system_prompt
+    assert "memory.importance 必须是 1 到 10 之间的整数" in system_prompt
+    assert "vital_deltas" not in system_prompt
+    assert "attribute_deltas" not in system_prompt
+
+
+@pytest.mark.parametrize("risk", ["low", "medium", "high", "fatal"])
+def test_choice_accepts_only_the_four_risk_levels(risk: str) -> None:
+    assert Choice(id="choice", label="行动", risk=risk).risk == risk
+
+
+def test_choice_rejects_unknown_risk_level() -> None:
+    with pytest.raises(ValidationError):
+        Choice(id="choice", label="行动", risk="unknown")
+
+
+def test_long_term_memory_requires_numeric_importance() -> None:
+    assert LongTermMemoryProposal(summary="重要事件", importance=8).importance == 8
+    with pytest.raises(ValidationError):
+        LongTermMemoryProposal(summary="重要事件", importance="major")
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("major", 8),
+        ("high", 8),
+        ("critical", 10),
+        ("重要", 8),
+        ("9", 9),
+        (99, 10),
+        (-4, 1),
+        ("not-a-level", 5),
+        (True, 5),
+    ],
+)
+def test_memory_importance_fallback_never_raises(value: Any, expected: int) -> None:
+    assert _normalize_memory_importance(value) == expected
 
 
 class _SequencedProvider:
@@ -82,13 +141,13 @@ async def test_request_response_repairs_with_error_context_and_zero_temperature(
             "title": "礼堂中的回声",
             "scene_type": "dialogue",
             "narrative": "烛光在长桌上轻轻摇曳。",
+            "current_date": "1991-09-01",
             "location_id": "great_hall",
-            "time_advance_minutes": 5,
         },
         "choices": [
-            {"id": "listen", "label": "仔细倾听", "kind": "action"},
-            {"id": "ask", "label": "询问身边同学", "kind": "action"},
-            {"id": "choice_other", "label": "其他", "kind": "free_text"},
+            {"id": "listen", "label": "仔细倾听", "kind": "action", "risk": "low"},
+            {"id": "ask", "label": "询问身边同学", "kind": "action", "risk": "medium"},
+            {"id": "choice_other", "label": "其他", "kind": "free_text", "risk": "low"},
         ],
         "state_proposals": {},
         "player_changes": {},
@@ -110,9 +169,9 @@ async def test_request_response_repairs_with_error_context_and_zero_temperature(
     invalid_response = {
         **valid_response,
         "choices": [
-            {"label": "缺少选项 ID", "kind": "action"},
-            {"id": "ask", "label": "询问身边同学", "kind": "action"},
-            {"id": "choice_other", "label": "其他", "kind": "free_text"},
+            {"label": "缺少选项 ID", "kind": "action", "risk": "low"},
+            {"id": "ask", "label": "询问身边同学", "kind": "action", "risk": "medium"},
+            {"id": "choice_other", "label": "其他", "kind": "free_text", "risk": "low"},
         ],
     }
     provider = _SequencedProvider(
@@ -132,3 +191,34 @@ async def test_request_response_repairs_with_error_context_and_zero_temperature(
     assert "choices.0.id" in repair_instruction
     assert "NARRATIVE_JSON_TEMPLATE_BEGIN" in repair_instruction
     assert "MEMORY_REQUEST_JSON_TEMPLATE_BEGIN" in repair_instruction
+
+
+@pytest.mark.asyncio
+async def test_request_response_repairs_text_memory_importance() -> None:
+    valid_response = _extract_json_template(
+        _build_messages()[0]["content"],
+        "NARRATIVE",
+    )
+    valid_response["memory_update"] = {
+        "summary": "玩家发现了密室入口。",
+        "create_long_term_memory": True,
+        "memory": {
+            "summary": "玩家发现了密室入口。",
+            "importance": 8,
+        },
+        "resolved_memory_ids": [],
+    }
+    invalid_response = deepcopy(valid_response)
+    invalid_response["memory_update"]["memory"]["importance"] = "major"
+    provider = _SequencedProvider([
+        _completion(json.dumps(invalid_response, ensure_ascii=False)),
+        _completion(json.dumps(valid_response, ensure_ascii=False)),
+    ])
+
+    result = await _request_response(provider, _build_messages())
+
+    assert isinstance(result, NarrativeResponse)
+    assert result.memory_update.memory is not None
+    assert result.memory_update.memory.importance == 8
+    assert len(provider.calls) == 2
+    assert "memory_update.memory.importance" in provider.calls[1]["messages"][-1]["content"]

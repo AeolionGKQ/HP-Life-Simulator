@@ -27,7 +27,7 @@ SETUP_STEPS = [
     SetupStep(
         step=1,
         title="时代",
-        description="选择故事所在的魔法史时期。当前测试版只开放子世代，其他世代的卷宗仍在整理。",
+        description="选择故事所在的魔法史时期。当前仅开放剧情内容已经完善的子世代；其余三个世代仍共用相同系统，但需要完成剧情后才可选择。",
         options=[
             option(
                 era["id"],
@@ -41,13 +41,29 @@ SETUP_STEPS = [
     ),
     SetupStep(
         step=2,
-        title="身份",
-        description="输入姓名、性别、生日和性取向。推荐格式：姓名：……，性别：……，生日：1980-……，性取向：……",
-        options=[option("custom_identity", "自定义身份", "身份完全由你决定。")],
+        title="姓名",
+        description="在命运尚未落笔之前，先为这位年轻巫师写下一个名字。它会回荡在羊皮纸、城堡走廊与未来相遇之人的低语中。",
+        options=[],
         selection_mode="text",
     ),
     SetupStep(
         step=3,
+        title="性别",
+        description="分院帽尚未落下，命运仍在等待你的自我定义。选择一个预设，或在墨水中写下你希望世界如何称呼这位角色。",
+        options=[
+            option("female", "女"),
+            option("male", "男"),
+        ],
+    ),
+    SetupStep(
+        step=4,
+        title="生日",
+        description="每个巫师出生的那一天，都像一颗落入时间长河的星辰。请以 YYYY-MM-DD 格式写下这颗星辰亮起的日期，它将成为年龄、记忆与命运流转的起点。",
+        options=[],
+        selection_mode="text",
+    ),
+    SetupStep(
+        step=5,
         title="外貌与体格",
         description="可点击多个外貌和体格描述词，它们会以逗号分隔追加到输入框；也可以继续自行修改。",
         selection_mode="append",
@@ -70,7 +86,7 @@ SETUP_STEPS = [
         ],
     ),
     SetupStep(
-        step=4,
+        step=6,
         title="出身",
         description="血统会影响童年环境和部分巫师的初始态度，但不会决定你的能力与选择。",
         options=[
@@ -92,7 +108,7 @@ SETUP_STEPS = [
         ],
     ),
     SetupStep(
-        step=5,
+        step=7,
         title="童年经历",
         description="选择塑造过你的经历，也可以补充自己的故事。建议选择三项。",
         selection_mode="append",
@@ -112,7 +128,7 @@ SETUP_STEPS = [
         ],
     ),
     SetupStep(
-        step=6,
+        step=8,
         title="性格",
         description="选择最贴近你的核心性格，之后的经历仍会让角色逐渐改变。",
         selection_mode="append",
@@ -132,7 +148,7 @@ SETUP_STEPS = [
         ],
     ),
     SetupStep(
-        step=7,
+        step=9,
         title="信仰与价值观",
         description="选择角色在故事开始时认同的观念。价值观可能在经历中受到挑战或改变。",
         selection_mode="append",
@@ -152,7 +168,7 @@ SETUP_STEPS = [
         ],
     ),
     SetupStep(
-        step=8,
+        step=10,
         title="魔杖",
         description="选择一种木材和一种杖芯，也可补充长度与柔韧性。奥利凡德强调：是魔杖选择巫师。",
         selection_mode="append",
@@ -180,7 +196,7 @@ SETUP_STEPS = [
         ],
     ),
     SetupStep(
-        step=9,
+        step=11,
         title="魔法天赋",
         description="选择一种罕见或鲜明的先天天赋。天赋代表潜力，而不是无需学习就能掌握力量。",
         selection_mode="append",
@@ -200,7 +216,7 @@ SETUP_STEPS = [
         ],
     ),
     SetupStep(
-        step=10,
+        step=12,
         title="宠物",
         description="普通学生最常携带猫头鹰、猫或蟾蜍；其他神奇动物可能需要额外照料、许可或承担麻烦。",
         options=[
@@ -218,7 +234,7 @@ SETUP_STEPS = [
         ],
     ),
     SetupStep(
-        step=11,
+        step=13,
         title="初始好友",
         description="可选择多位原著人物，也可以输入自定义姓名。选择的人物会以朋友身份进入关系列表并获得初始好感。",
         selection_mode="append",
@@ -236,7 +252,7 @@ SETUP_STEPS = [
         ],
     ),
     SetupStep(
-        step=12,
+        step=14,
         title="剧情起点",
         description="选择故事真正开始的时刻。越晚的起点会略过此前流程，但不会抹去角色背景。",
         options=[
@@ -247,9 +263,57 @@ SETUP_STEPS = [
         ],
     ),
     SetupStep(
-        step=13,
+        step=15,
+        title="学院",
+        description=(
+            "礼堂上空，千万支烛火在夜色中静静漂浮；四张长桌旁，等待已久的目光纷纷投向你。"
+            "那顶古老的分院帽低声翻阅你的勇气、忠诚、智慧与抱负，准备为未来七年的归处唱出答案。"
+            "此刻，请从霍格沃茨四大学院中选择一个，让它的名字落在你的命运卷宗上。"
+        ),
+        options=[
+            option("gryffindor", "格兰芬多", "重视勇气、胆识与在困难面前坚持的决心。", value="gryffindor"),
+            option("hufflepuff", "赫奇帕奇", "重视忠诚、勤劳、公平与对同伴的真诚。", value="hufflepuff"),
+            option("ravenclaw", "拉文克劳", "重视智慧、求知欲、创造力与独立思考。", value="ravenclaw"),
+            option("slytherin", "斯莱特林", "重视目标、机敏、资源整合与实现抱负的决心。", value="slytherin"),
+        ],
+    ),
+    SetupStep(
+        step=16,
+        title="选择你的守护神",
+        description=(
+            "在银白色的雾光真正回应咒语以前，先辨认可能守护你灵魂的形态。"
+            "犬、猫与马是巫师中较常见的守护神，其他动物也会映照独特的记忆、性格与羁绊。"
+            "选择一个预设，或写下只属于你的守护神。此时它仍是潜在形态；"
+            "角色未学会【呼神护卫】时无法将它召唤出来。"
+        ),
+        options=[
+            option("dolphin", "海豚", "灵动而亲近同伴，像一道穿过黑暗水面的银光。"),
+            option("cat", "猫", "敏锐、独立而富有好奇心，会无声守在最需要它的地方。"),
+            option("dog", "犬", "忠诚、热情且勇于保护同伴，是魔法界常见的守护形态。"),
+            option("horse", "马", "自由而坚韧，带着沉稳的力量穿越恐惧与长夜。"),
+            option("stag", "雄鹿", "高贵、勇敢而坚定，昂首挡在危险与所爱之人之间。"),
+            option("doe", "牝鹿", "温柔、警觉而执着，以安静的光芒指引迷途者。"),
+            option("otter", "水獭", "聪慧、活泼而富有韧性，总能在湍流中找到方向。"),
+            option("hare", "野兔", "机敏、迅捷而富有直觉，会在危机逼近前跃入月光。"),
+            option("fox", "狐狸", "善于观察、适应与寻找隐秘道路，很少被表象欺骗。"),
+            option("wolf", "狼", "坚韧而重视羁绊，既能独自行走，也会守护认定的同伴。"),
+        ],
+    ),
+    SetupStep(
+        step=17,
+        title="补充你自己",
+        description=(
+            "命运卷宗已经写满姓名、出身与天赋，却仍为你留着最后一块空白。"
+            "在这里写下任何还想让魔法世界记住的设定：习惯、恐惧、愿望、秘密、"
+            "口头禅，或一段无人知晓的往事。也可以什么都不写，让未来的经历亲自留下答案。"
+        ),
+        options=[],
+        selection_mode="text",
+    ),
+    SetupStep(
+        step=18,
         title="最终确认",
-        description="检查完整角色设定。确认后将生成初始状态、好友关系，并从选定起点开始游戏。",
+        description="烛火掠过命运卷宗的最后一页。请检查完整角色设定；确认后将生成初始状态与好友关系，并从选定起点开启故事。",
         options=[option("confirm", "确认并开始", "角色创建完成后仍可在剧情中成长和改变。")],
         selection_mode="confirm",
     ),
