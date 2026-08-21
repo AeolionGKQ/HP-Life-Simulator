@@ -111,7 +111,7 @@ const finalSetupView = {
     "11": "古代魔文直觉",
     "12": "猫头鹰",
     "13": "卢娜·洛夫古德",
-    "14": "分院时",
+    "14": "sorting_ceremony",
     "15": "ravenclaw",
   },
   attribute_initialization: { status: "pending" },
@@ -510,6 +510,8 @@ for (const viewport of viewports) {
       await page.goto("/");
       await page.getByRole("button", { name: `打开存档：${setupSession.name}` }).click();
       await expect(page.getByRole("heading", { name: finalSetupView.current.title })).toBeVisible();
+      await expect(page.getByText("分院时", { exact: true })).toBeVisible();
+      await expect(page.getByText("sorting_ceremony", { exact: true })).toHaveCount(0);
 
       await page.getByRole("button", { name: "确认角色并开始" }).click();
       await expect(page.getByRole("status")).toContainText("命运正在校准你的魔法回响");

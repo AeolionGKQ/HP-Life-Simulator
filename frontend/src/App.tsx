@@ -768,6 +768,8 @@ function SetupSummary({
           <p>
             {step === "1"
               ? formatEraAnswer(answers[step], eras)
+              : step === "14"
+                ? formatStartingPointAnswer(answers[step])
               : step === "15"
                 ? formatHouseAnswer(answers[step])
               : formatSetupAnswer(answers[step])}
@@ -795,6 +797,19 @@ function formatEraAnswer(answer: unknown, eras: EraInfo[]): string {
   const eraId = String(answer ?? "");
   const era = eras.find((item) => item.id === eraId);
   return era ? `${era.name}（${era.years}）` : formatSetupAnswer(answer);
+}
+
+const STARTING_POINT_LABELS: Record<string, string> = {
+  before_first_letter: "收到霍格沃茨来信之前",
+  before_letter: "收到霍格沃茨来信之前",
+  diagon_alley: "第一次踏入对角巷",
+  platform_nine_three_quarters: "九又四分之三站台",
+  sorting_ceremony: "分院时",
+};
+
+function formatStartingPointAnswer(answer: unknown): string {
+  const value = String(answer ?? "");
+  return STARTING_POINT_LABELS[value] ?? formatSetupAnswer(answer);
 }
 
 function formatSetupAnswer(answer: unknown): string {
