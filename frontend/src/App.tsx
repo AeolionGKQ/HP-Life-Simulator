@@ -442,7 +442,18 @@ export function App() {
               <button aria-label="关闭模型服务配置" className="modal-close" onClick={() => setConfigOpen(false)}><X aria-hidden="true" /></button>
             </div>
             <p className="modal-note">配置只保存到本机文件，API Key 不会回显到页面。</p>
-            <label>Base URL<input value={configDraft.base_url} onChange={(event) => setConfigDraft({ ...configDraft, base_url: event.target.value })} placeholder="https://api.example.com" /></label>
+            <label>
+              Base URL
+              <input
+                aria-describedby="base-url-hint"
+                value={configDraft.base_url}
+                onChange={(event) => setConfigDraft({ ...configDraft, base_url: event.target.value })}
+                placeholder="https://api.example.com"
+              />
+              <span className="config-field-hint" id="base-url-hint">
+                只填写服务根地址，例如 https://api.openai.com；请勿附加 /v1 或 /v1/chat/completions。
+              </span>
+            </label>
             <label>API Key<input type="password" value={configDraft.api_key} onChange={(event) => setConfigDraft({ ...configDraft, api_key: event.target.value })} placeholder="输入新的 API Key" /></label>
             <label>模型名<input value={configDraft.model} onChange={(event) => setConfigDraft({ ...configDraft, model: event.target.value })} placeholder="model-name" /></label>
             {configMessage && <div className="config-message">{configMessage}</div>}

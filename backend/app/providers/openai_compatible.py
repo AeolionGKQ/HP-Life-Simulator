@@ -9,6 +9,13 @@ import httpx
 from backend.app.core.config import LLMSettings
 
 
+GPT_5_6_MODELS = {
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+}
+
+
 class OpenAICompatibleProvider:
     def __init__(self, settings: LLMSettings) -> None:
         self.settings = settings
@@ -32,11 +39,12 @@ class OpenAICompatibleProvider:
         payload: dict[str, Any] = {
             "model": self.settings.model,
             "messages": messages,
-            "temperature": (
-                self.settings.temperature if temperature is None else temperature
-            ),
             "stream": False,
         }
+        if self.settings.model.strip().lower() not in GPT_5_6_MODELS:
+            payload["temperature"] = (
+                self.settings.temperature if temperature is None else temperature
+            )
         if self.settings.supports_json_schema:
             payload["response_format"] = {"type": "json_object"}
         timeout = httpx.Timeout(self.settings.timeout_seconds)
@@ -86,4 +94,3 @@ class OpenAICompatibleProvider:
             success = False
         latency_ms = round((time.perf_counter() - started) * 1000)
         return success, message, latency_ms
-

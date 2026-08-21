@@ -266,6 +266,7 @@ h3 { margin-bottom: 5px; font-size: 17px; font-weight: 560; }
 .modal-note { margin: 10px 0 2px; color: var(--muted); font: 12px/1.75 var(--sans); }
 .config-modal label { display: grid; gap: 8px; margin-top: 17px; color: var(--text-soft); font: 650 12px var(--sans); }
 .config-modal input { width: 100%; }
+.config-field-hint { color: var(--muted-dark); font: 400 10px/1.65 var(--sans); }
 
 .config-message {
   margin-top: 16px;
