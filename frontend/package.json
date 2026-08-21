@@ -1,12 +1,12 @@
 {
   "name": "hp-simulator-frontend",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.3.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "test": "vitest run",
+    "test": "playwright test tests/ui-contract.spec.ts tests/visual-review.spec.ts",
     "test:e2e": "playwright test tests/ui-contract.spec.ts tests/visual-review.spec.ts",
     "test:e2e:real": "playwright test tests/real-backend.spec.ts"
   },

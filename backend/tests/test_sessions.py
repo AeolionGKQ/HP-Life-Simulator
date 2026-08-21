@@ -74,6 +74,75 @@ def test_create_and_read_session() -> None:
         assert "attributes" not in detail.json()["player_state"]
 
 
+def test_starting_point_accepts_only_predefined_story_nodes() -> None:
+    with TestClient(create_app()) as client:
+        created = client.post("/api/sessions", json={"name": "预设起点测试"})
+        session_id = created.json()["id"]
+        with get_session_factory()() as db:
+            player_state = db.scalar(
+                select(PlayerState).where(PlayerState.session_id == session_id)
+            )
+            assert player_state is not None
+            state = dict(player_state.state)
+            setup = dict(state["setup"])
+            setup["current_step"] = 14
+            state["setup"] = setup
+            player_state.state = state
+            db.commit()
+
+        custom = client.post(
+            f"/api/sessions/{session_id}/setup/answer",
+            json={"step": 14, "answer": "我想从密室开启故事"},
+        )
+        assert custom.status_code == 409
+        assert "预设节点" in custom.json()["detail"]
+
+        selected = client.post(
+            f"/api/sessions/{session_id}/setup/answer",
+            json={"step": 14, "answer": "sorting_ceremony"},
+        )
+        assert selected.status_code == 200
+        assert selected.json()["answers"]["14"] == "sorting_ceremony"
+
+
+def test_acknowledge_departure_notice_persists_and_increments_state_version() -> None:
+    with TestClient(create_app()) as client:
+        created = client.post("/api/sessions", json={"name": "开除通知测试"})
+        session_id = created.json()["id"]
+        before_version = created.json()["state_version"]
+
+        with get_session_factory()() as db:
+            player_state = db.scalar(
+                select(PlayerState).where(PlayerState.session_id == session_id)
+            )
+            assert player_state is not None
+            state = dict(player_state.state)
+            school = dict(state.get("school", {}))
+            school["grade"] = "left_school"
+            school["departure_reason"] = "expelled"
+            school["departure_notice"] = {
+                "status": "pending",
+                "notice_id": "expulsion:year_1:-61",
+                "reason": "expelled",
+                "title": "霍格沃兹开除通知",
+                "message": "声望过低，已被开除。",
+            }
+            state["school"] = school
+            player_state.state = state
+            db.commit()
+
+        response = client.post(
+            f"/api/sessions/{session_id}/departure-notice/acknowledge"
+        )
+
+        assert response.status_code == 200
+        assert response.json()["state_version"] == before_version + 1
+        assert (
+            response.json()["state"]["school"]["departure_notice"]["status"]
+            == "acknowledged"
+        )
+
+
 def test_setup_requires_current_step() -> None:
     with TestClient(create_app()) as client:
         created = client.post(
@@ -124,11 +193,13 @@ def test_setup_academy_only_accepts_four_choices() -> None:
         ).json()["id"]
         for step in range(1, 15):
             answer = (
-                "second_generation"
-                if step == 1
-                else "1980-03-12"
-                if step == 4
-                else f"answer-{step}"
+                    "second_generation"
+                    if step == 1
+                    else "1980-03-12"
+                    if step == 4
+                    else "before_first_letter"
+                    if step == 14
+                    else f"answer-{step}"
             )
             response = client.post(
                 f"/api/sessions/{session_id}/setup/answer",
@@ -183,11 +254,13 @@ def test_rename_and_delete_save_clears_related_data() -> None:
                 json={
                     "step": step,
                     "answer": (
-                        "second_generation"
-                        if step == 1
-                        else "1980-03-12"
-                        if step == 4
-                        else "gryffindor"
+                            "second_generation"
+                            if step == 1
+                            else "1980-03-12"
+                            if step == 4
+                            else "before_first_letter"
+                            if step == 14
+                            else "gryffindor"
                         if step == 15
                         else f"answer-{step}"
                     ),
@@ -246,6 +319,8 @@ def test_setup_materializes_npcs_and_state() -> None:
                         if step == 1
                         else "1980-03-12"
                         if step == 4
+                        else "before_first_letter"
+                        if step == 14
                         else "gryffindor"
                         if step == 15
                         else f"answer-{step}"
@@ -437,7 +512,9 @@ def test_action_applies_rules_and_is_idempotent(monkeypatch) -> None:
                             "relationship_deltas": [
                               {
                                 "npc_id": "hermione_granger",
-                                "affinity_delta": 4
+                                "affinity_delta": 4,
+                                "reason": "玩家在危机中保护了赫敏",
+                                "evidence": "本轮叙事记录了两人的明确互动"
                               }
                             ]
                           },
@@ -494,7 +571,9 @@ def test_action_applies_rules_and_is_idempotent(monkeypatch) -> None:
                             "relationship_deltas": [
                               {
                                 "npc_id": "hermione_granger",
-                                "affinity_delta": 4
+                                "affinity_delta": 4,
+                                "reason": "玩家在危机中保护了赫敏",
+                                "evidence": "本轮叙事记录了两人的明确互动"
                               }
                             ]
                           },
@@ -528,11 +607,13 @@ def test_action_applies_rules_and_is_idempotent(monkeypatch) -> None:
                 json={
                     "step": step,
                     "answer": (
-                        "second_generation"
-                        if step == 1
-                        else "1980-03-12"
-                        if step == 4
-                        else "gryffindor"
+                            "second_generation"
+                            if step == 1
+                            else "1980-03-12"
+                            if step == 4
+                            else "before_first_letter"
+                            if step == 14
+                            else "gryffindor"
                         if step == 15
                         else f"answer-{step}"
                     ),
@@ -569,9 +650,28 @@ def test_action_applies_rules_and_is_idempotent(monkeypatch) -> None:
         assert repeated.status_code == 200
         assert repeated.json()["turn_id"] == result.json()["turn_id"]
 
+        fate_action = {
+            "client_action_id": f"fate-action-id-{session_id}",
+            "expected_state_version": 2,
+            "kind": "fate_intervention",
+            "fate_instruction": "下一幕让无名书出现在禁书区，并让赫敏发现它。",
+        }
+        fate_result = client.post(
+            f"/api/sessions/{session_id}/actions",
+            json=fate_action,
+        )
+        assert fate_result.status_code == 200, fate_result.text
+        assert fate_result.json()["state_version"] == 3
+        fate_prompt_context = captured_messages[-1]["content"]
+        assert '"kind": "fate_intervention"' in fate_prompt_context
+        assert "无名书出现在禁书区" in fate_prompt_context
+        recorded_turns = client.get(f"/api/sessions/{session_id}/turns")
+        assert recorded_turns.status_code == 200
+        assert recorded_turns.json()[-1]["action"]["kind"] == "fate_intervention"
+
         state = client.get(f"/api/sessions/{session_id}/state").json()["state"]
-        assert state["dimensions"]["willpower"]["value"] == 11
-        assert state["resources"]["mana"]["value"] == 92
+        assert state["dimensions"]["willpower"]["value"] == 12
+        assert state["resources"]["mana"]["value"] == 84
         assert state["current_context"]["current_date"] == "1991-07-01"
         assert state["current_context"]["datetime"].startswith("1991-07-01T09:00:00")
         assert state["inventory"][0]["item_id"] == "hogwarts_letter"

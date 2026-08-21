@@ -58,6 +58,23 @@ const setupView = {
   },
 };
 
+const startingPointSetupView = {
+  ...setupView,
+  current_step: 14,
+  current: {
+    step: 14,
+    title: "剧情起点",
+    description: "从已经编排好的剧情节点中选择故事真正开始的时刻。",
+    selection_mode: "single" as const,
+    options: [
+      { id: "before_first_letter", label: "收到霍格沃茨来信之前", description: "从魔法尚未得到解释的普通早晨开始。", value: "before_first_letter", category: "", appendable: false, available: true },
+      { id: "diagon_alley", label: "第一次踏入对角巷", description: "从采购魔杖、长袍、课本和坩埚开始。", value: "diagon_alley", category: "", appendable: false, available: true },
+      { id: "platform_nine_three_quarters", label: "九又四分之三站台", description: "从蒸汽、猫头鹰叫声和即将启程的列车开始。", value: "platform_nine_three_quarters", category: "", appendable: false, available: true },
+      { id: "sorting_ceremony", label: "分院时", description: "直接从礼堂的烛光、四张长桌和分院帽落到头顶的那一刻开始。", value: "sorting_ceremony", category: "", appendable: false, available: true },
+    ],
+  },
+};
+
 const completedSetup = {
   current_step: 18,
   completed: true,
@@ -170,21 +187,77 @@ const playerState = {
   personality: { temperament: "安静而好奇" },
   values: { belief: "知识应当被谨慎地分享" },
   magic_talents: [{ name: "古代魔文直觉", rank: "初现" }],
-  skills: { charms: 12, transfiguration: 9 },
+  skills: {
+    charms: {
+      id: "charms",
+      name: "咒语",
+      description: "学习施放、控制和组合各种实用咒语。",
+      level: 2,
+      experience: 0,
+      source: "course",
+      course_id: "charms",
+      course_skill: true,
+    },
+    transfiguration: {
+      id: "transfiguration",
+      name: "变形术",
+      description: "研究改变物体形态与性质的魔法。",
+      level: 1,
+      experience: 0,
+      source: "course",
+      course_id: "transfiguration",
+      course_skill: true,
+    },
+  },
   statuses: [],
   traits: [{ id: "careful_reader", name: "谨慎的阅读者", polarity: "positive", source: "童年", description: "面对未知文字时更容易察觉异常。" }],
   inventory: [{ name: "榆木魔杖" }, { name: "黄铜书签" }],
   pet: { name: "墨点", species: "猫头鹰" },
-  reputation: { ravenclaw: 8 },
+  reputation: {
+    score: 24,
+    level_id: "kindly",
+    level_name: "友善倾向",
+    alignment: "轻微正面",
+    last_delta: 4,
+    last_reason: "保护低年级学生并公开作证",
+  },
   letters: [],
 };
 
-type Scenario = "landing" | "setup" | "setup-confirm" | "story";
+const expelledPlayerState = {
+  ...playerState,
+  school: {
+    grade: "left_school",
+    house: "ravenclaw",
+    departure_reason: "expelled",
+    active_courses: [],
+    elective_courses: [],
+    newt_courses: [],
+    course_selection: null,
+    departure_notice: {
+      status: "pending",
+      notice_id: "expulsion:year_1:-61",
+      reason: "expelled",
+      title: "霍格沃兹开除通知",
+      message: "由于你的声望已低至【黑巫师】级别，你已被霍格沃兹开除。当前学籍已经终止，课程已清空，请尽快离开学校。",
+    },
+  },
+  reputation: {
+    score: -61,
+    level_id: "black_wizard",
+    level_name: "黑巫师",
+    alignment: "偏向黑巫师",
+    last_delta: -8,
+    last_reason: "持续伤害无辜者并破坏学校安全",
+  },
+};
+
+type Scenario = "landing" | "setup" | "setup-confirm" | "setup-starting-point" | "story" | "expulsion";
 
 async function installApi(page: Page, scenario: Scenario) {
-  const sessions = scenario === "setup" || scenario === "setup-confirm"
+  const sessions = scenario === "setup" || scenario === "setup-confirm" || scenario === "setup-starting-point"
     ? [setupSession]
-    : scenario === "story"
+    : scenario === "story" || scenario === "expulsion"
       ? [activeSession]
       : [];
   await page.route("**/api/**", async (route) => {
@@ -195,9 +268,17 @@ async function installApi(page: Page, scenario: Scenario) {
       "/api/config/llm": { configured: true, base_url: "https://example.invalid", model: "arcane-narrator", api_key_present: true },
       "/api/sessions": sessions,
       "/api/content/eras": [era],
-      "/api/sessions/session-setup/setup": scenario === "setup-confirm" ? finalSetupView : setupView,
+      "/api/sessions/session-setup/setup": scenario === "setup-confirm"
+        ? finalSetupView
+        : scenario === "setup-starting-point"
+          ? startingPointSetupView
+          : setupView,
       "/api/sessions/session-active/setup": completedSetup,
-  "/api/sessions/session-active/state": { session_id: "session-active", state_version: 7, state: playerState },
+      "/api/sessions/session-active/state": {
+        session_id: "session-active",
+        state_version: scenario === "expulsion" ? 8 : 7,
+        state: scenario === "expulsion" ? expelledPlayerState : playerState,
+      },
       "/api/sessions/session-active/courses": {
         session_id: "session-active",
         state_version: 7,
@@ -219,13 +300,44 @@ async function installApi(page: Page, scenario: Scenario) {
         course_history: [],
       },
       "/api/sessions/session-active/journal": [{ id: "journal-1", turn_id: "turn-7", entry_type: "story", title: "午夜后的图书馆", summary: "无名旧书写下了你的名字。", data: { sequence: 7 }, created_at: "1991-09-03T00:18:00Z" }],
-      "/api/sessions/session-active/relationships": [{ source_id: "player", target_id: "luna_lovegood", state: { stage: "acquaintance", affinity: 18, trust: 12 } }],
+      "/api/sessions/session-active/relationships": [{
+        source_id: "player",
+        target_id: "luna_lovegood",
+        state: {
+          stage: "acquaintance",
+          bond_type: "friendship",
+          romance_stage: "none",
+          affinity: 18,
+          trust: 12,
+          last_change: { reason: "一起整理了图书馆的旧书架" },
+        },
+      }],
       "/api/sessions/session-active/npcs": [{ npc_id: "luna_lovegood", is_original_character: false, state: { name: "卢娜·洛夫古德" } }],
       "/api/sessions/session-active/turns": [
         { id: "turn-6", sequence: 6, action: { kind: "choice" }, narrative: previousTurnResponse.turn.narrative, response: previousTurnResponse, state_version_after: 6, created_at: "1991-09-02T00:18:00Z" },
         { id: "turn-7", sequence: 7, action: { kind: "choice" }, narrative: turnResponse.turn.narrative, response: turnResponse, state_version_after: 7, created_at: "1991-09-03T00:18:00Z" },
       ],
     };
+    if (path === "/api/sessions/session-active/departure-notice/acknowledge") {
+      await route.fulfill({
+        status: 200,
+        json: {
+          session_id: "session-active",
+          state_version: 9,
+          state: {
+            ...expelledPlayerState,
+            school: {
+              ...expelledPlayerState.school,
+              departure_notice: {
+                ...expelledPlayerState.school.departure_notice,
+                status: "acknowledged",
+              },
+            },
+          },
+        },
+      });
+      return;
+    }
     if (path === "/api/sessions/session-setup/setup/confirm") {
       await new Promise((resolve) => setTimeout(resolve, 450));
       await route.fulfill({
@@ -378,6 +490,21 @@ for (const viewport of viewports) {
       await page.screenshot({ path: `test-results/visual-review/${viewport.name}-setup.png` });
     });
 
+    test("restricts the story starting point to predefined options", async ({ page }) => {
+      await installApi(page, "setup-starting-point");
+      await page.goto("/");
+      await page.getByRole("button", { name: `打开存档：${setupSession.name}` }).click();
+
+      await expect(page.getByRole("heading", { name: "剧情起点" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "收到霍格沃茨来信之前" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "第一次踏入对角巷" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "九又四分之三站台" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "分院时" })).toBeVisible();
+      await expect(page.getByRole("textbox", { name: "剧情起点" })).toHaveCount(0);
+      if (viewport.name === "mobile") await assertMinimumTouchTargets(page);
+      await assertNoHorizontalOverflow(page);
+    });
+
     test("shows attribute calibration progress and keeps retry available after failure", async ({ page }) => {
       await installApi(page, "setup-confirm");
       await page.goto("/");
@@ -412,6 +539,56 @@ for (const viewport of viewports) {
       await page.screenshot({ path: `test-results/visual-review/${viewport.name}-story.png` });
     });
 
+  test("shows reputation score and level in the reputation archive", async ({ page }) => {
+      await installApi(page, "story");
+      await page.goto("/");
+      await page.getByRole("button", { name: `打开存档：${activeSession.name}` }).click();
+      await page.getByRole("button", { name: "声望" }).click();
+
+      await expect(page.getByRole("heading", { name: "友善倾向" })).toBeVisible();
+      await expect(page.getByText("+24", { exact: true })).toBeVisible();
+      await expect(page.getByText("轻微正面", { exact: true })).toBeVisible();
+      await expect(page.getByText("本回合声望上升 +4", { exact: true })).toBeVisible();
+      await expect(page.getByText("保护低年级学生并公开作证", { exact: true })).toBeVisible();
+      if (viewport.name === "mobile") await assertMinimumTouchTargets(page);
+      await assertNoHorizontalOverflow(page);
+    });
+
+    test("shows a blocking expulsion notice after automatic reputation expulsion", async ({ page }) => {
+      await installApi(page, "expulsion");
+      await page.goto("/");
+      await page.getByRole("button", { name: `打开存档：${activeSession.name}` }).click();
+
+      await expect(page.getByRole("heading", { name: "霍格沃兹开除通知" })).toBeVisible();
+      await expect(page.getByText("声望已低至【黑巫师】级别", { exact: false })).toBeVisible();
+      await expect(page.getByRole("button", { name: "确认并离开学校" })).toBeEnabled();
+      await expect(page.getByRole("button", { name: "举起魔杖，走近那本自行书写的旧书" })).toHaveCount(0);
+
+      await page.getByRole("button", { name: "确认并离开学校" }).click();
+      await expect(page.getByRole("heading", { name: "霍格沃兹开除通知" })).toBeHidden();
+      if (viewport.name === "mobile") await assertMinimumTouchTargets(page);
+      await assertNoHorizontalOverflow(page);
+    });
+
+    test("translates course skill fields in the character archive", async ({ page }) => {
+      await installApi(page, "story");
+      await page.goto("/");
+      await page.getByRole("button", { name: `打开存档：${activeSession.name}` }).click();
+      await page.getByRole("button", { name: "角色" }).click();
+
+      const skillsSection = page.locator(".data-section").filter({
+        has: page.getByRole("heading", { name: "技能与熟练度" }),
+      });
+      await expect(skillsSection.getByText("课程", { exact: true })).toHaveCount(2);
+      await expect(skillsSection.getByText("课程技能", { exact: true })).toHaveCount(2);
+      await expect(skillsSection.getByText("记录编号", { exact: true })).toHaveCount(2);
+      await expect(skillsSection.getByText("变形术", { exact: true })).toHaveCount(4);
+      await expect(skillsSection.getByText("Course Id", { exact: true })).toHaveCount(0);
+      await expect(skillsSection.getByText("Course Skill", { exact: true })).toHaveCount(0);
+      await expect(skillsSection.getByText("Transfiguration", { exact: true })).toHaveCount(0);
+      await expect(skillsSection.getByText("transfiguration", { exact: true })).toHaveCount(0);
+    });
+
     test("browses previous story nodes without allowing historical choices", async ({ page }) => {
       await installApi(page, "story");
       await page.goto("/");
@@ -437,6 +614,30 @@ for (const viewport of viewports) {
       await assertNoHorizontalOverflow(page);
     });
 
+    test("opens fate intervention and submits a direct story target", async ({ page }) => {
+      await installApi(page, "story");
+      await page.goto("/");
+      await page.getByRole("button", { name: `打开存档：${activeSession.name}` }).click();
+
+      await page.getByRole("button", { name: /干涉命运/ }).click();
+      const instruction = page.getByRole("textbox", { name: "你希望接下来发生什么" });
+      await expect(instruction).toBeVisible();
+      await instruction.fill("下一幕让我在禁书区发现一本会写下我名字的无名书。");
+      await expect(page.getByText(/\/2000$/)).toBeVisible();
+
+      const actionRequest = page.waitForRequest((request) =>
+        request.url().endsWith("/api/sessions/session-active/actions")
+        && request.method() === "POST",
+      );
+      await page.getByRole("button", { name: "干涉命运并结束当前节点" }).click();
+      const requestBody = JSON.parse((await actionRequest).postData() ?? "{}");
+      expect(requestBody.kind).toBe("fate_intervention");
+      expect(requestBody.fate_instruction).toContain("禁书区");
+      await expect(page.getByRole("status")).toContainText("命运的墨迹正在改道");
+      if (viewport.name === "mobile") await assertMinimumTouchTargets(page);
+      await assertNoHorizontalOverflow(page);
+    });
+
     test("keeps archive panels available while the quill writes", async ({ page }) => {
       await installApi(page, "story");
       await page.goto("/");
@@ -450,6 +651,21 @@ for (const viewport of viewports) {
 
       await page.getByRole("button", { name: "剧情" }).click();
       await expect(page.getByRole("status")).toContainText("羽毛笔正在书写命运");
+    });
+
+    test("shows canonical bond details in the bond archive", async ({ page }) => {
+      await installApi(page, "story");
+      await page.goto("/");
+      await page.getByRole("button", { name: `打开存档：${activeSession.name}` }).click();
+      await page.getByRole("button", { name: "羁绊" }).click();
+      await expect(page.getByText("卢娜·洛夫古德")).toBeVisible();
+      await expect(page.getByText("相识")).toBeVisible();
+      await expect(page.getByText("友情")).toBeVisible();
+      await expect(page.getByText("好感 18/100 · 信任 12/100")).toBeVisible();
+      await expect(page.getByText("最近变化：一起整理了图书馆的旧书架")).toBeVisible();
+      await expect(page.getByText("romance_state")).not.toBeVisible();
+      if (viewport.name === "mobile") await assertMinimumTouchTargets(page);
+      await assertNoHorizontalOverflow(page);
     });
   });
 }

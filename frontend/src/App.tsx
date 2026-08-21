@@ -34,7 +34,7 @@ const menuItems = [
   { label: "剧情", icon: BookOpenText },
   { label: "角色", icon: User },
   { label: "纪事", icon: Scroll },
-  { label: "关系与好感", icon: UsersThree },
+  { label: "羁绊", icon: UsersThree },
   { label: "恋爱", icon: Heart },
   { label: "声望", icon: Medal },
   { label: "课程", icon: GraduationCap },
@@ -533,7 +533,7 @@ export function App() {
               <div className="setup-input-row">
                 {setup.current.selection_mode !== "confirm" ? (
                   <>
-                    {setup.current_step !== 1 && setup.current_step !== 15 && (
+                    {setup.current_step !== 1 && setup.current_step !== 14 && setup.current_step !== 15 && (
                       setup.current_step === 4 ? (
                         <input
                           aria-label="生日"

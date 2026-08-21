@@ -63,6 +63,9 @@ class PlayerState(Base):
 
 class NPCState(Base):
     __tablename__ = "npc_states"
+    __table_args__ = (
+        Index("ix_npc_session_npc_id", "session_id", "npc_id", unique=True),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     session_id: Mapped[str] = mapped_column(String(36), ForeignKey("game_sessions.id"))
@@ -73,6 +76,15 @@ class NPCState(Base):
 
 class Relationship(Base):
     __tablename__ = "relationships"
+    __table_args__ = (
+        Index(
+            "ix_relationship_session_source_target",
+            "session_id",
+            "source_id",
+            "target_id",
+            unique=True,
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     session_id: Mapped[str] = mapped_column(String(36), ForeignKey("game_sessions.id"))

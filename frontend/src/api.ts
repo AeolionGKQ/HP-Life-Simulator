@@ -194,6 +194,7 @@ export interface PlayerChanges {
   dimension_cap_deltas: Array<Record<string, any>>;
   reputation_deltas: Record<string, number>;
   relationship_deltas: Array<Record<string, any>>;
+  relationship_creations: Array<Record<string, any>>;
 }
 
 export interface TurnResult {
@@ -324,6 +325,10 @@ export const api = {
     }),
   state: (id: string) => request<PlayerStateResponse>(`/api/sessions/${id}/state`),
   courses: (id: string) => request<CourseView>(`/api/sessions/${id}/courses`),
+  acknowledgeDepartureNotice: (id: string) =>
+    request<PlayerStateResponse>(`/api/sessions/${id}/departure-notice/acknowledge`, {
+      method: "POST",
+    }),
   selectCourses: (id: string, payload: CourseSelectionRequest) =>
     request<CourseView>(`/api/sessions/${id}/courses`, {
       method: "PUT",
@@ -339,9 +344,10 @@ export const api = {
     payload: {
       client_action_id: string;
       expected_state_version: number;
-      kind: "choice" | "free_text" | "fast_forward";
+      kind: "choice" | "free_text" | "fast_forward" | "fate_intervention";
       choice_id?: string;
       free_text?: string;
+      fate_instruction?: string;
     },
   ) =>
     request<TurnResult>(`/api/sessions/${id}/actions`, {

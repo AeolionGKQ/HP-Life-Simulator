@@ -126,6 +126,68 @@ def test_june_progression_is_idempotent_and_does_not_change_grade() -> None:
     assert "course_skills" not in repeated_changes
 
 
+def test_departure_clears_current_courses_and_skips_june_progression() -> None:
+    state = _enrolled_state()
+    state["school"]["elective_courses"] = ["divination"]
+    state["school"]["newt_courses"] = ["alchemy"]
+    state["school"]["course_selection"] = {
+        "status": "pending",
+        "phase": "elective",
+        "min_courses": 2,
+        "max_courses": 3,
+        "available_course_ids": ["divination"],
+    }
+    state["school"]["course_history"] = [{"school_year": "1990-1991"}]
+
+    next_state, changes = apply_turn_rules(
+        state,
+        [],
+        _response(
+            "1992-06-01",
+            grade="left_school",
+            transition={
+                "type": "departure",
+                "from_grade": "year_1",
+                "to_grade": "left_school",
+                "reason": "dropout",
+                "evidence": "玩家明确申请退学并完成离校手续。",
+            },
+        ),
+    )
+
+    school = next_state["school"]
+    assert school["grade"] == "left_school"
+    assert school["active_courses"] == []
+    assert school["elective_courses"] == []
+    assert school["newt_courses"] == []
+    assert school["course_selection"] is None
+    assert school["course_history"] == [{"school_year": "1990-1991"}]
+    assert next_state["skills"]["charms"]["level"] == 0
+    assert "course_skills" not in changes
+    assert set(changes["courses_cleared"]) == {
+        "active_courses",
+        "elective_courses",
+        "newt_courses",
+        "course_selection",
+    }
+
+
+def test_left_school_legacy_courses_do_not_progress_in_june() -> None:
+    state = _enrolled_state()
+    state["school"]["grade"] = "left_school"
+    state["skills"]["charms"]["level"] = 4
+
+    next_state, changes = apply_turn_rules(
+        state,
+        [],
+        _response("1993-06-01", grade="left_school"),
+    )
+
+    assert next_state["school"]["active_courses"] == []
+    assert next_state["skills"]["charms"]["level"] == 4
+    assert "course_skills" not in changes
+
+
 def test_september_promotion_is_idempotent_and_opens_elective_selection() -> None:
     state = _enrolled_state()
     state["school"]["grade"] = "year_2"

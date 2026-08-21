@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from backend.app.prompts.turn import build_turn_messages
 from backend.app.schemas.game import (
+    ActionRequest,
     Choice,
     LongTermMemoryProposal,
     MemoryRequest,
@@ -79,6 +80,80 @@ def test_turn_system_prompt_contains_parseable_response_templates() -> None:
     assert "memory.importance 必须是 1 到 10 之间的整数" in system_prompt
     assert "vital_deltas" not in system_prompt
     assert "attribute_deltas" not in system_prompt
+    assert "fate_instruction" in system_prompt
+    assert "干涉命运" in system_prompt
+    assert "声望是程序掌握的总体社会印象" in system_prompt
+    assert "单轮最多增加 10 点或减少 10 点" in system_prompt
+    assert '"score": 整数' in system_prompt
+    assert "高声望不能自动成功" in system_prompt
+    assert "player_state.school.grade 是 left_school" in system_prompt
+    assert "尽快离开" in system_prompt
+    assert "返聘为教授" in system_prompt
+    assert "声望达到 black_wizard 或 dark_paragon 时，程序会自动执行 expelled" in system_prompt
+    assert "哈利·波特" in system_prompt
+    assert "姓 + 小姐/先生" in system_prompt
+    assert "中间名" in system_prompt
+    assert "不能倒置" in system_prompt
+    assert "当前世代主线是历史压力和因果背景，不是强制任务列表" in system_prompt
+    assert "一轮最多主动推进一个主线焦点" in system_prompt
+    assert "玩家拥有独立人生" in system_prompt
+    assert "不得默认玩家认识所有原著人物" in system_prompt
+    assert "羁绊系统统一描述" in system_prompt
+    assert "relationship_creations" in system_prompt
+    assert "每轮最多创建一个新 NPC" in system_prompt
+    assert "NPC 年龄未知" in system_prompt
+    assert "committed、adult_stage 和 marriage" in system_prompt
+
+
+def test_turn_context_contains_layered_generation_background() -> None:
+    messages = _build_messages()
+    context = json.loads(
+        messages[1]["content"].split("以下是本回合的权威状态和上下文：\n", 1)[1]
+    )
+    generation = context["generation"]
+
+    assert generation["id"] == "second_generation"
+    assert generation["era_frame"]["historical_mood"]
+    assert "南瓜汁的甜腻" in generation["era_frame"]["core_atmosphere"]
+    assert generation["mainline_phase"]["id"] == "letter_and_enrollment"
+    assert generation["timeline_phase"]["phase_id"] == "pre_enrollment_summer"
+    assert generation["freedom_rules"]
+    assert generation["worldline_pressure"]["offset_rate"] == 0
+    assert "worldline_rule" in generation["worldline_pressure"]
+
+
+def test_fate_intervention_request_requires_exclusive_non_empty_instruction() -> None:
+    request = ActionRequest(
+        client_action_id="fate-1",
+        expected_state_version=4,
+        kind="fate_intervention",
+        fate_instruction="  下一幕让无名书出现在禁书区。  ",
+    )
+    assert request.fate_instruction == "下一幕让无名书出现在禁书区。"
+
+    with pytest.raises(ValidationError):
+        ActionRequest(
+            client_action_id="fate-empty",
+            expected_state_version=4,
+            kind="fate_intervention",
+            fate_instruction="   ",
+        )
+    with pytest.raises(ValidationError):
+        ActionRequest(
+            client_action_id="fate-mixed",
+            expected_state_version=4,
+            kind="fate_intervention",
+            choice_id="choice_1",
+            fate_instruction="下一幕发生一件事",
+        )
+    with pytest.raises(ValidationError):
+        ActionRequest(
+            client_action_id="ordinary",
+            expected_state_version=4,
+            kind="choice",
+            choice_id="choice_1",
+            fate_instruction="不应出现在普通行动中",
+        )
 
 
 @pytest.mark.parametrize("risk", ["low", "medium", "high", "fatal"])

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from copy import deepcopy
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
@@ -35,6 +36,29 @@ from backend.app.content.courses import (
     course_skill_ids,
     grade_number,
 )
+from backend.app.content.reputation import (
+    REPUTATION_MAX,
+    REPUTATION_MIN,
+    REPUTATION_TURN_LIMIT,
+    get_reputation_level,
+    normalize_reputation,
+)
+from backend.app.content.bonds import (
+    AFFINITY_MAX,
+    AFFINITY_MIN,
+    BOND_TYPE_IDS,
+    ROMANCE_STAGE_IDS,
+    ROMANTIC_STAGE_IDS,
+    RELATIONSHIP_TURN_LIMIT,
+    SOCIAL_STAGE_IDS,
+    SOCIAL_STAGE_ORDER,
+    SOCIAL_STAGE_THRESHOLDS,
+    TRUST_MAX,
+    TRUST_MIN,
+    normalize_relationship_state,
+    romance_summary,
+    safe_bounded_int,
+)
 from backend.app.schemas.game import NarrativeResponse
 
 
@@ -42,6 +66,8 @@ def apply_turn_rules(
     state: dict[str, Any],
     relationships: list[Relationship],
     response: NarrativeResponse,
+    *,
+    npc_ages: dict[str, int | None] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """应用模型提出的可验证变化，返回新状态和审计差异。"""
     next_state = deepcopy(state)
@@ -89,10 +115,9 @@ def apply_turn_rules(
     context["location_id"] = response.turn.location_id
     if response.turn.location_id != state.get("current_context", {}).get("location_id"):
         changes["location_id"] = response.turn.location_id
-    _update_age(next_state, old_datetime, changes)
+    _update_age(next_state, _parse_datetime(context.get("datetime")), changes)
     _apply_school_exam_events(next_state, response.events, changes)
     _apply_grade_transition(next_state, response, current_date, changes)
-    _apply_course_year_end(next_state, current_date, changes)
 
     _apply_resource_caps(next_state, proposals.get("resource_cap_deltas"), changes)
     _apply_dimension_caps(next_state, proposals.get("dimension_cap_deltas"), changes)
@@ -108,8 +133,17 @@ def apply_turn_rules(
     _apply_statuses(next_state, proposals, changes)
     _apply_traits(next_state, proposals, changes)
     _apply_reputation(next_state, proposals.get("reputation_deltas"), changes)
+    _apply_reputation_enforcement(next_state, changes)
+    _apply_course_year_end(next_state, current_date, changes)
     _apply_inventory(next_state, proposals, changes)
-    _apply_relationships(next_state, relationships, proposals, changes)
+    _apply_relationships(
+        next_state,
+        relationships,
+        proposals,
+        changes,
+        npc_ages=npc_ages,
+        current_date=current_date,
+    )
     _apply_lifecycle(next_state, changes)
     response.turn.grade = normalize_grade(next_state.setdefault("school", {}))
     return next_state, changes
@@ -197,6 +231,8 @@ def _apply_grade_transition(
     school["grade"] = current_grade
     if current_grade != "not_enrolled":
         school["enrollment_started"] = True
+    if current_grade == "left_school":
+        _clear_current_courses(school, changes)
     else:
         school.setdefault("enrollment_started", False)
 
@@ -283,6 +319,7 @@ def _apply_grade_transition(
         _apply_grade_course_structure(state, school, requested_grade, changes)
     else:
         school["departure_reason"] = transition.reason
+        _clear_current_courses(school, changes)
     changes["school_grade"] = {
         "before": current_grade,
         "after": requested_grade,
@@ -349,6 +386,68 @@ def _grade_transition_rejection(
     if reason in PERMANENT_DEPARTURE_REASONS and current_grade.startswith("year_"):
         return None
     return "transition_target_mismatch"
+
+
+def _clear_current_courses(
+    school: dict[str, Any],
+    changes: dict[str, Any],
+) -> None:
+    course_fields = (
+        "active_courses",
+        "elective_courses",
+        "newt_courses",
+        "course_selection",
+    )
+    cleared: dict[str, Any] = {}
+    for field in course_fields:
+        current = school.get(field)
+        if current:
+            cleared[field] = deepcopy(current)
+        school[field] = None if field == "course_selection" else []
+    if cleared:
+        changes["courses_cleared"] = cleared
+
+
+def _apply_reputation_enforcement(
+    state: dict[str, Any],
+    changes: dict[str, Any],
+) -> None:
+    school = state.setdefault("school", {})
+    current_grade = normalize_grade(school)
+    if not current_grade.startswith("year_"):
+        return
+    reputation = state.get("reputation", {})
+    level_id = str(reputation.get("level_id", "")) if isinstance(reputation, dict) else ""
+    if level_id not in {"black_wizard", "dark_paragon"}:
+        return
+
+    score = reputation.get("score", 0) if isinstance(reputation, dict) else 0
+    school["grade"] = "left_school"
+    school["departure_reason"] = "expelled"
+    _clear_current_courses(school, changes)
+    notice = school.get("departure_notice")
+    if not isinstance(notice, dict) or notice.get("status") != "pending":
+        notice = {
+            "status": "pending",
+            "notice_id": f"expulsion:{current_grade}:{score}",
+            "reason": "expelled",
+            "title": "霍格沃兹开除通知",
+            "message": "由于你的声望已低至【黑巫师】级别，你已被霍格沃兹开除。当前学籍已经终止，课程已清空，请尽快离开学校。",
+        }
+        school["departure_notice"] = notice
+    changes["school_grade"] = {
+        "before": current_grade,
+        "after": "left_school",
+        "type": "departure",
+        "reason": "expelled",
+        "automatic": True,
+    }
+    changes["automatic_expulsion"] = {
+        "score": score,
+        "level_id": level_id,
+        "reason": "reputation_reached_black_wizard",
+    }
+    changes["departure_notice"] = deepcopy(notice)
 
 
 def _auto_promote_on_new_school_year(
@@ -497,6 +596,8 @@ def _apply_course_year_end(
         "autumn" if current_date.month >= 9 else school.get("term", "summer")
     )
     if current_date.month != 6:
+        return
+    if normalize_grade(school) == "left_school":
         return
     if school.get("last_course_progression_year") == current_date.year:
         return
@@ -1028,18 +1129,69 @@ def _apply_reputation(
     deltas: Any,
     changes: dict[str, Any],
 ) -> None:
+    before_state = normalize_reputation(state.get("reputation"))
+    state["reputation"] = before_state
     if not isinstance(deltas, dict):
         return
-    reputation = state.setdefault("reputation", {})
-    applied: dict[str, int] = {}
-    for key, raw_delta in deltas.items():
-        if not isinstance(raw_delta, (int, float)):
-            continue
-        before = int(reputation.get(key, 0))
-        reputation[key] = max(-100, min(100, before + int(raw_delta)))
-        applied[key] = reputation[key] - before
-    if applied:
-        changes["reputation"] = applied
+
+    requested = deltas.get("score")
+    rejected: list[dict[str, Any]] = []
+    for key, value in deltas.items():
+        if key != "score":
+            rejected.append({"key": str(key), "value": value, "reason": "unknown_reputation_key"})
+    if isinstance(requested, bool) or not isinstance(requested, (int, float)):
+        if requested is not None:
+            rejected.append({"key": "score", "value": requested, "reason": "invalid_reputation_delta"})
+        if rejected:
+            changes["reputation"] = {
+                "score_before": before_state["score"],
+                "requested_delta": requested,
+                "applied_delta": 0,
+                "score_after": before_state["score"],
+                "level_before": before_state["level_id"],
+                "level_after": before_state["level_id"],
+                "rejected": rejected,
+            }
+        return
+    if isinstance(requested, float) and not math.isfinite(requested):
+        rejected.append({"key": "score", "value": requested, "reason": "invalid_reputation_delta"})
+        changes["reputation"] = {
+            "score_before": before_state["score"],
+            "requested_delta": requested,
+            "applied_delta": 0,
+            "score_after": before_state["score"],
+            "level_before": before_state["level_id"],
+            "level_after": before_state["level_id"],
+            "rejected": rejected,
+        }
+        return
+
+    requested_delta = int(requested)
+    bounded_delta = max(-REPUTATION_TURN_LIMIT, min(REPUTATION_TURN_LIMIT, requested_delta))
+    score_before = before_state["score"]
+    score_after = max(REPUTATION_MIN, min(REPUTATION_MAX, score_before + bounded_delta))
+    applied_delta = score_after - score_before
+    after_level = get_reputation_level(score_after)
+    state["reputation"] = {
+        **before_state,
+        "score": score_after,
+        "level_id": after_level["id"],
+        "level_name": after_level["name"],
+        "alignment": after_level["alignment"],
+        "last_delta": applied_delta,
+        "last_reason": "剧情行动影响" if applied_delta else "",
+    }
+    changes["reputation"] = {
+        "score_before": score_before,
+        "requested_delta": requested_delta,
+        "applied_delta": applied_delta,
+        "score_after": score_after,
+        "level_before": before_state["level_id"],
+        "level_after": after_level["id"],
+        "rejected": rejected,
+    }
+    if rejected:
+        changes["reputation"]["rejected"] = rejected
 
 
 def _apply_inventory(
@@ -1104,51 +1256,121 @@ def _apply_relationships(
     relationships: list[Relationship],
     proposals: dict[str, Any],
     changes: dict[str, Any],
+    *,
+    npc_ages: dict[str, int | None] | None = None,
+    current_date: date | None = None,
 ) -> None:
     deltas = proposals.get("relationship_deltas")
     if not isinstance(deltas, list):
+        refresh_romance_summary(state, relationships)
         return
-    player_age = int(state.get("identity", {}).get("age", 10))
-    by_npc = {relationship.target_id: relationship for relationship in relationships}
+    player_age = safe_bounded_int(
+        state.get("identity", {}).get("age"),
+        default=10,
+        minimum=0,
+        maximum=150,
+    )
+    npc_ages = npc_ages or {}
+    by_npc = {
+        relationship.target_id: relationship
+        for relationship in relationships
+        if relationship.source_id == "player"
+    }
     applied: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
     for item in deltas:
         if not isinstance(item, dict):
+            rejected.append({"proposal": item, "reason": "relationship_delta_not_object"})
             continue
         npc_id = str(item.get("npc_id", ""))
         relationship = by_npc.get(npc_id)
         if relationship is None:
+            rejected.append({"npc_id": npc_id, "reason": "relationship_not_found"})
             continue
-        relation_state = deepcopy(relationship.state)
+        affinity_delta = _parse_relationship_delta(
+            item,
+            "affinity_delta",
+            rejected,
+            npc_id,
+        )
+        trust_delta = _parse_relationship_delta(
+            item,
+            "trust_delta",
+            rejected,
+            npc_id,
+        )
+        if affinity_delta is None or trust_delta is None:
+            continue
+        relation_state = normalize_relationship_state(
+            relationship.state,
+            current_date=current_date.isoformat() if current_date else None,
+            player_age=player_age,
+        )
         before = {
-            "affinity": int(relation_state.get("affinity", 0)),
-            "trust": int(relation_state.get("trust", 0)),
-            "stage": relation_state.get("stage", "stranger"),
+            "affinity": relation_state["affinity"],
+            "trust": relation_state["trust"],
+            "stage": relation_state["stage"],
+            "romance_stage": relation_state["romance_stage"],
         }
         relation_state["affinity"] = max(
-            0,
-            min(100, before["affinity"] + int(item.get("affinity_delta", 0))),
+            AFFINITY_MIN,
+            min(AFFINITY_MAX, before["affinity"] + affinity_delta),
         )
         relation_state["trust"] = max(
-            0,
-            min(100, before["trust"] + int(item.get("trust_delta", 0))),
+            TRUST_MIN,
+            min(TRUST_MAX, before["trust"] + trust_delta),
         )
+        reason = str(item.get("reason") or "")
+        evidence = str(item.get("evidence") or "")
+        if (affinity_delta or trust_delta) and not (reason and evidence):
+            rejected.append(
+                {
+                    "npc_id": npc_id,
+                    "reason": "relationship_change_missing_evidence",
+                    "proposal": item,
+                }
+            )
+            continue
         requested_stage = item.get("stage")
+        requested_romance_stage = item.get("romance_stage")
+        if isinstance(requested_stage, str) and requested_stage in ROMANTIC_STAGE_IDS:
+            requested_romance_stage = requested_romance_stage or requested_stage
+            requested_stage = None
         if requested_stage:
-            requested_stage = str(requested_stage)
-            if _stage_allowed(requested_stage, player_age):
-                relation_state["stage"] = requested_stage
+            _apply_social_stage(
+                relation_state,
+                str(requested_stage),
+                reason=reason,
+                evidence=evidence,
+                rejected=rejected,
+                npc_id=npc_id,
+            )
+        if requested_romance_stage:
+            _apply_romance_stage(
+                relation_state,
+                str(requested_romance_stage),
+                player_age=player_age,
+                npc_age=npc_ages.get(npc_id),
+                reason=reason,
+                evidence=evidence,
+                rejected=rejected,
+                npc_id=npc_id,
+            )
+        requested_bond_type = item.get("bond_type")
+        if requested_bond_type:
+            if str(requested_bond_type) in BOND_TYPE_IDS:
+                relation_state["bond_type"] = str(requested_bond_type)
             else:
-                pending = relation_state.setdefault("pending_stage_unlocks", [])
-                requirement = 12 if requested_stage in {"dating", "romance"} else 18
-                if not any(
-                    item.get("stage") == requested_stage
-                    for item in pending
-                    if isinstance(item, dict)
-                ):
-                    pending.append(
-                        {"stage": requested_stage, "required_age": requirement}
-                    )
-        _release_pending_stage(relation_state, player_age)
+                rejected.append(
+                    {"npc_id": npc_id, "reason": "unknown_bond_type", "proposal": item}
+                )
+        if current_date:
+            relation_state["last_interaction_date"] = current_date.isoformat()
+        relation_state["last_change"] = {
+            "affinity_delta": affinity_delta,
+            "trust_delta": trust_delta,
+            "reason": reason,
+        }
         relationship.state = relation_state
         applied.append(
             {
@@ -1158,35 +1380,252 @@ def _apply_relationships(
                     "affinity": relation_state["affinity"],
                     "trust": relation_state["trust"],
                     "stage": relation_state["stage"],
+                    "romance_stage": relation_state["romance_stage"],
                 },
+                "affinity_delta": affinity_delta,
+                "trust_delta": trust_delta,
+                "reason": reason,
             }
         )
+    _release_pending_relationships(
+        relationships,
+        player_age=player_age,
+        npc_ages=npc_ages,
+        rejected=rejected,
+    )
     if applied:
         changes["relationships"] = applied
+    if rejected:
+        changes["relationship_rejections"] = rejected
+    refresh_romance_summary(state, relationships)
 
 
-def _stage_allowed(stage: str, player_age: int) -> bool:
-    if stage in {"dating", "romance"}:
-        return player_age >= 12
-    if stage in {"committed", "adult_stage", "marriage"}:
-        return player_age >= 18
-    return True
+def _parse_relationship_delta(
+    item: dict[str, Any],
+    key: str,
+    rejected: list[dict[str, Any]],
+    npc_id: str,
+) -> int | None:
+    if key not in item:
+        return 0
+    value = item.get(key)
+    if value is None or isinstance(value, bool):
+        rejected.append({"npc_id": npc_id, "reason": f"{key}_invalid", "proposal": item})
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError, OverflowError):
+        rejected.append({"npc_id": npc_id, "reason": f"{key}_invalid", "proposal": item})
+        return None
+    return max(-RELATIONSHIP_TURN_LIMIT, min(RELATIONSHIP_TURN_LIMIT, parsed))
 
 
-def _release_pending_stage(relation_state: dict[str, Any], player_age: int) -> None:
-    pending = relation_state.get("pending_stage_unlocks", [])
-    if not isinstance(pending, list):
+def _apply_social_stage(
+    relation_state: dict[str, Any],
+    requested_stage: str,
+    *,
+    reason: str,
+    evidence: str,
+    rejected: list[dict[str, Any]],
+    npc_id: str,
+) -> None:
+    current_stage = relation_state["stage"]
+    if requested_stage not in SOCIAL_STAGE_IDS:
+        rejected.append({"npc_id": npc_id, "reason": "unknown_social_stage"})
         return
-    remaining = []
-    for item in pending:
-        if not isinstance(item, dict):
+    if requested_stage == current_stage:
+        return
+    if not reason and not evidence:
+        rejected.append({"npc_id": npc_id, "reason": "stage_missing_evidence"})
+        return
+    if requested_stage in {"estranged", "hostile"}:
+        relation_state["stage"] = requested_stage
+        return
+    current_order = SOCIAL_STAGE_ORDER.get(current_stage, 0)
+    requested_order = SOCIAL_STAGE_ORDER.get(requested_stage, 0)
+    if requested_order <= current_order:
+        rejected.append({"npc_id": npc_id, "reason": "social_stage_regression"})
+        return
+    if requested_order != current_order + 1:
+        rejected.append({"npc_id": npc_id, "reason": "social_stage_skip"})
+        return
+    required_affinity, required_trust = SOCIAL_STAGE_THRESHOLDS[requested_stage]
+    if requested_stage == "acquaintance":
+        threshold_not_met = (
+            relation_state["affinity"] < required_affinity
+            and relation_state["trust"] < required_trust
+        )
+    else:
+        threshold_not_met = (
+            relation_state["affinity"] < required_affinity
+            or relation_state["trust"] < required_trust
+        )
+    if threshold_not_met:
+        rejected.append({"npc_id": npc_id, "reason": "social_stage_threshold_not_met"})
+        return
+    relation_state["stage"] = requested_stage
+
+
+def _apply_romance_stage(
+    relation_state: dict[str, Any],
+    requested_stage: str,
+    *,
+    player_age: int,
+    npc_age: int | None,
+    reason: str,
+    evidence: str,
+    rejected: list[dict[str, Any]],
+    npc_id: str,
+) -> None:
+    if requested_stage not in ROMANCE_STAGE_IDS:
+        rejected.append({"npc_id": npc_id, "reason": "unknown_romance_stage"})
+        return
+    if requested_stage in {"none", "locked"}:
+        relation_state["romance_stage"] = requested_stage
+        return
+    required_age = 12 if requested_stage == "dating" else 18
+    if player_age < required_age:
+        _add_pending_unlock(
+            relation_state,
+            requested_stage,
+            required_age,
+            reason,
+        )
+        relation_state["romance_stage"] = "locked"
+        return
+    if npc_age is None or npc_age < 12:
+        rejected.append({"npc_id": npc_id, "reason": "npc_age_unknown_or_too_young"})
+        return
+    if (player_age < 18) != (npc_age < 18):
+        rejected.append({"npc_id": npc_id, "reason": "romance_age_incompatible"})
+        return
+    if requested_stage in {"committed", "adult_stage", "marriage"} and (
+        player_age < 18 or npc_age < 18
+    ):
+        rejected.append({"npc_id": npc_id, "reason": "adult_romance_requires_two_adults"})
+        return
+    if not reason and not evidence:
+        rejected.append({"npc_id": npc_id, "reason": "romance_missing_evidence"})
+        return
+    if relation_state["stage"] not in {"friend", "close_friend"}:
+        rejected.append({"npc_id": npc_id, "reason": "romance_social_stage_not_met"})
+        return
+    if relation_state["affinity"] < 20 or relation_state["trust"] < 10:
+        rejected.append({"npc_id": npc_id, "reason": "romance_threshold_not_met"})
+        return
+    relation_state["romance_stage"] = requested_stage
+
+
+def _add_pending_unlock(
+    relation_state: dict[str, Any],
+    requested_stage: str,
+    required_age: int,
+    reason: str,
+) -> None:
+    pending = relation_state.setdefault("pending_unlocks", [])
+    if not isinstance(pending, list):
+        pending = []
+        relation_state["pending_unlocks"] = pending
+    if any(
+        isinstance(item, dict) and item.get("romance_stage") == requested_stage
+        for item in pending
+    ):
+        return
+    pending.append(
+        {
+            "romance_stage": requested_stage,
+            "required_age": required_age,
+            "reason": reason,
+        }
+    )
+
+
+def _release_pending_relationships(
+    relationships: list[Relationship],
+    *,
+    player_age: int,
+    npc_ages: dict[str, int | None],
+    rejected: list[dict[str, Any]],
+) -> None:
+    for relationship in relationships:
+        if relationship.source_id != "player":
             continue
-        required_age = int(item.get("required_age", 99))
-        if player_age >= required_age:
-            relation_state["stage"] = str(item.get("stage", relation_state.get("stage")))
-        else:
-            remaining.append(item)
-    relation_state["pending_stage_unlocks"] = remaining
+        relation_state = normalize_relationship_state(
+            relationship.state,
+            player_age=player_age,
+        )
+        current_romance = relation_state["romance_stage"]
+        npc_age = npc_ages.get(relationship.target_id)
+        if current_romance in ROMANTIC_STAGE_IDS:
+            required_age = 12 if current_romance == "dating" else 18
+            compatible = (
+                npc_age is not None
+                and npc_age >= 12
+                and ((player_age < 18) == (npc_age < 18))
+                and (required_age < 18 or (player_age >= 18 and npc_age >= 18))
+            )
+            if player_age < required_age:
+                _add_pending_unlock(
+                    relation_state,
+                    current_romance,
+                    required_age,
+                    "年龄条件已重新复核",
+                )
+                relation_state["romance_stage"] = "locked"
+            elif not compatible:
+                relation_state["romance_stage"] = "none"
+        pending = relation_state["pending_unlocks"]
+        remaining: list[dict[str, Any]] = []
+        for item in pending:
+            requested_stage = str(item.get("romance_stage", ""))
+            required_age = safe_bounded_int(
+                item.get("required_age"),
+                default=18,
+                minimum=0,
+                maximum=150,
+            )
+            if player_age < required_age:
+                remaining.append(item)
+                continue
+            if (
+                npc_age is None
+                or npc_age < 12
+                or ((player_age < 18) != (npc_age < 18))
+                or (
+                    requested_stage in {"committed", "adult_stage", "marriage"}
+                    and (player_age < 18 or npc_age < 18)
+                )
+            ):
+                relation_state["romance_stage"] = "none"
+                continue
+            before = relation_state["romance_stage"]
+            _apply_romance_stage(
+                relation_state,
+                requested_stage,
+                player_age=player_age,
+                npc_age=npc_age,
+                reason=str(item.get("reason") or "年龄条件已满足"),
+                evidence="待解锁阶段自动复核",
+                rejected=rejected,
+                npc_id=relationship.target_id,
+            )
+            if relation_state["romance_stage"] == before:
+                remaining.append(item)
+        relation_state["pending_unlocks"] = remaining
+        relationship.state = relation_state
+
+
+def refresh_romance_summary(
+    state: dict[str, Any],
+    relationships: list[Relationship],
+) -> None:
+    state["romance"] = romance_summary(
+        (
+            (relationship.target_id, relationship.state)
+            for relationship in relationships
+            if relationship.source_id == "player"
+        )
+    )
 
 
 def _update_age(

@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import re
 import httpx
+from datetime import date
+from hashlib import sha1
 from typing import Any
 from uuid import uuid4
 
@@ -12,6 +14,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app.core.config import get_settings
+from backend.app.content.bonds import (
+    age_band,
+    current_age_for_npc,
+    normalize_relationship_state,
+    safe_bounded_int,
+)
 from backend.app.models import (
     GameSession,
     JournalEntry,
@@ -24,13 +32,13 @@ from backend.app.models import (
 )
 from backend.app.providers.openai_compatible import OpenAICompatibleProvider
 from backend.app.prompts.turn import TURN_OUTPUT_PROTOCOL, build_turn_messages
-from backend.app.rules.state import apply_turn_rules
+from backend.app.rules.state import apply_turn_rules, refresh_romance_summary
 from backend.app.schemas.game import (
     ActionRequest,
+    AppliedPlayerChanges,
     Choice,
     MemoryRequest,
     NarrativeResponse,
-    PlayerChanges,
     TurnResponse,
 )
 from backend.app.services.memory import get_memories_by_ids, recall_memories
@@ -332,6 +340,7 @@ def _action_text(payload: ActionRequest) -> str:
         for item in (
             payload.choice_id or "",
             payload.free_text or "",
+            payload.fate_instruction or "",
         )
         if item
     )
@@ -370,6 +379,7 @@ async def generate_turn(
     if isinstance(course_selection, dict) and course_selection.get("status") == "pending":
         raise HTTPException(status_code=409, detail="请先完成当前学年的课程选择")
 
+    current_context = player_state.state.get("current_context", {})
     npcs = list(
         db.scalars(select(NPCState).where(NPCState.session_id == game_session.id))
     )
@@ -377,6 +387,10 @@ async def generate_turn(
         db.scalars(
             select(Relationship).where(Relationship.session_id == game_session.id)
         )
+    )
+    _refresh_npc_ages(
+        npcs,
+        _parse_story_date(current_context.get("current_date")),
     )
     summaries = list(
         db.scalars(
@@ -398,7 +412,6 @@ async def generate_turn(
         recent_turns,
         settings.game.recent_turn_token_limit,
     )
-    current_context = player_state.state.get("current_context", {})
     action = payload.model_dump()
     action_text = _action_text(payload)
     actor_ids = [npc.npc_id for npc in npcs]
@@ -472,18 +485,45 @@ async def generate_turn(
     )
     response.worldline.delta = response.worldline.offset_rate - previous_offset
 
+    accepted_date = _accepted_story_date(
+        player_state.state,
+        response.turn.current_date,
+    )
+    npc_ages = _refresh_npc_ages(npcs, accepted_date)
     state, authoritative_changes = apply_turn_rules(
         player_state.state,
         relationships,
         response,
+        npc_ages=npc_ages,
     )
+    creation_result = _apply_relationship_creations(
+        db,
+        game_session.id,
+        payload.client_action_id,
+        response.player_changes.relationship_creations,
+        accepted_date,
+        npcs,
+        relationships,
+    )
+    if creation_result["created"]:
+        relationships.extend(creation_result["relationships"])
+        authoritative_changes["relationship_creations"] = creation_result["accepted"]
+        authoritative_changes["relationships_created"] = creation_result["created"]
+        authoritative_changes["relationship_creation_rejections"] = creation_result[
+            "rejected"
+        ]
+        refresh_romance_summary(state, relationships)
+    elif creation_result["rejected"]:
+        authoritative_changes["relationship_creation_rejections"] = creation_result[
+            "rejected"
+        ]
     state["worldline"] = response.worldline.model_dump()
     lifecycle_status = state.get("lifecycle", {}).get("status")
     if lifecycle_status == "dead":
         game_session.status = "ended"
     player_state.state = state
     visible_changes = _visible_changes(authoritative_changes)
-    response.applied_changes = PlayerChanges.model_validate(visible_changes)
+    response.applied_changes = AppliedPlayerChanges.model_validate(visible_changes)
     game_session.state_version += 1
     sequence = (
         db.scalar(
@@ -511,7 +551,7 @@ async def generate_turn(
         },
         memory_update=response.memory_update.model_dump(),
         worldline=response.worldline.model_dump(),
-        prompt_version="v1-turn-memory",
+        prompt_version="v1.6-bonds",
         model_name=settings.llm.model,
         state_version_before=payload.expected_state_version,
         state_version_after=game_session.state_version,
@@ -591,7 +631,220 @@ def _visible_changes(changes: dict[str, Any]) -> dict[str, Any]:
         "dimension_cap_deltas": changes.get("dimension_caps", {}).get("applied", []),
         "reputation_deltas": changes.get("reputation", {}),
         "relationship_deltas": changes.get("relationships", []),
+        "relationship_creations": changes.get("relationship_creations", []),
     }
+
+
+def _parse_story_date(value: Any) -> date:
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except (TypeError, ValueError):
+        return date(1991, 7, 1)
+
+
+def _accepted_story_date(
+    state: dict[str, Any],
+    requested_date: date,
+) -> date:
+    current_context = state.get("current_context", {})
+    current_date = _parse_story_date(
+        current_context.get("current_date")
+        if isinstance(current_context, dict)
+        else None
+    )
+    return max(current_date, requested_date)
+
+
+def _refresh_npc_ages(
+    npcs: list[NPCState],
+    story_date: date,
+) -> dict[str, int | None]:
+    ages: dict[str, int | None] = {}
+    for npc in npcs:
+        npc_state = dict(npc.state) if isinstance(npc.state, dict) else {}
+        current_age = current_age_for_npc(npc_state, story_date)
+        if current_age is not None:
+            npc_state["age"] = current_age
+            npc_state["age_band"] = age_band(current_age)
+            npc_state.setdefault("age_reference_date", story_date.isoformat())
+            npc.state = npc_state
+        ages[npc.npc_id] = current_age
+    return ages
+
+
+def _apply_relationship_creations(
+    db: Session,
+    session_id: str,
+    action_id: str,
+    proposals: list[Any],
+    current_date: date,
+    npcs: list[NPCState],
+    relationships: list[Relationship],
+) -> dict[str, Any]:
+    created: list[dict[str, Any]] = []
+    accepted: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
+    new_relationships: list[Relationship] = []
+    if not proposals:
+        return {
+            "accepted": accepted,
+            "created": created,
+            "rejected": rejected,
+            "relationships": new_relationships,
+        }
+
+    existing_names: dict[str, NPCState] = {}
+    for npc in npcs:
+        npc_state = npc.state if isinstance(npc.state, dict) else {}
+        names = [npc_state.get("name", ""), *npc_state.get("aliases", [])]
+        for name in names:
+            key = _normalize_person_name(name)
+            if key:
+                existing_names[key] = npc
+    if len(proposals) > 1:
+        rejected.extend(
+            {
+                "reason": "relationship_creation_limit_exceeded",
+                "proposal": proposal.model_dump(mode="json"),
+            }
+            for proposal in proposals[1:]
+        )
+    proposal = proposals[0]
+    character = proposal.character
+    character_data = character.model_dump(mode="json")
+    name_key = _normalize_person_name(character_data["name"])
+    if not name_key:
+        rejected.append({"reason": "relationship_name_empty"})
+    elif name_key in existing_names:
+        rejected.append(
+            {
+                "reason": "relationship_duplicate",
+                "name": character_data["name"],
+                "existing_npc_id": existing_names[name_key].npc_id,
+            }
+        )
+    elif not proposal.reason.strip() or not proposal.evidence.strip():
+        rejected.append(
+            {
+                "reason": "relationship_creation_missing_evidence",
+                "name": character_data["name"],
+            }
+        )
+    else:
+        digest = sha1(
+            f"{session_id}:{name_key}".encode("utf-8"),
+            usedforsecurity=False,
+        ).hexdigest()[:12]
+        npc_id = f"model_npc_{digest}"
+        npc_state = {
+            "name": character_data["name"],
+            "role": character_data["role"],
+            "age": character_data["age"],
+            "birthday": character_data["birthday"],
+            "age_band": (
+                age_band(character_data["age"])
+                if character_data["age"] is not None
+                else character_data["age_band"]
+            ),
+            "age_reference_date": current_date.isoformat(),
+            "location_id": character_data["location_id"],
+            "personality": character_data["personality"],
+            "appearance": character_data["appearance"],
+            "goals": character_data["goals"],
+            "fears": character_data["fears"],
+            "secrets": [],
+            "emotion": "neutral",
+            "aliases": character_data["aliases"],
+            "origin": "model_created",
+            "created_action_id": action_id,
+        }
+        npc = NPCState(
+            session_id=session_id,
+            npc_id=npc_id,
+            is_original_character=False,
+            state=npc_state,
+        )
+        bond = proposal.bond.model_dump(mode="json")
+        affinity = safe_bounded_int(
+            bond.get("affinity_delta"),
+            minimum=0,
+            maximum=10,
+        )
+        trust = safe_bounded_int(
+            bond.get("trust_delta"),
+            minimum=0,
+            maximum=10,
+        )
+        stage = (
+            "acquaintance"
+            if bond["stage"] == "acquaintance" and (affinity >= 5 or trust >= 5)
+            else "stranger"
+        )
+        if bond["stage"] not in {"stranger", "acquaintance"}:
+            rejected.append(
+                {
+                    "reason": "new_relationship_social_stage_downgraded",
+                    "name": character_data["name"],
+                    "requested_stage": bond["stage"],
+                    "applied_stage": stage,
+                }
+            )
+        if bond["romance_stage"] not in {"none", "locked"}:
+            rejected.append(
+                {
+                    "reason": "new_relationship_romance_stage_downgraded",
+                    "name": character_data["name"],
+                    "requested_stage": bond["romance_stage"],
+                    "applied_stage": "none",
+                }
+            )
+        relation = Relationship(
+            session_id=session_id,
+            source_id="player",
+            target_id=npc_id,
+            state=normalize_relationship_state(
+                {
+                    "affinity": affinity,
+                    "trust": trust,
+                    "stage": stage,
+                    "bond_type": bond["bond_type"],
+                    "romance_stage": "none",
+                    "known_since": current_date.isoformat(),
+                    "last_interaction_date": current_date.isoformat(),
+                    "last_change": {
+                        "affinity_delta": affinity,
+                        "trust_delta": trust,
+                        "reason": proposal.reason,
+                    },
+                    "origin": "model_created",
+                },
+                current_date=current_date.isoformat(),
+            ),
+        )
+        db.add(npc)
+        db.add(relation)
+        npcs.append(npc)
+        new_relationships.append(relation)
+        accepted.append(proposal.model_dump(mode="json"))
+        created.append(
+            {
+                "npc_id": npc_id,
+                "name": character_data["name"],
+                "stage": stage,
+                "bond_type": bond["bond_type"],
+                "reason": proposal.reason,
+            }
+        )
+    return {
+        "accepted": accepted,
+        "created": created,
+        "rejected": rejected,
+        "relationships": new_relationships,
+    }
+
+
+def _normalize_person_name(value: Any) -> str:
+    return re.sub(r"[\s·•,，。.!！？?_\-]+", "", str(value or "")).casefold()
 
 
 async def _request_response(

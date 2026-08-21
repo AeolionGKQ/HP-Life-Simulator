@@ -50,6 +50,10 @@ export function GameView({
   const [turnHistory, setTurnHistory] = useState<StoredTurn[]>([]);
   const [viewedTurnIndex, setViewedTurnIndex] = useState(-1);
   const [freeText, setFreeText] = useState("");
+  const [fateInterventionOpen, setFateInterventionOpen] = useState(false);
+  const [fateInstruction, setFateInstruction] = useState("");
+  const [fateIntervening, setFateIntervening] = useState(false);
+  const [acknowledgingDeparture, setAcknowledgingDeparture] = useState(false);
   const [loading, setLoading] = useState(false);
   const [initializingAttributes, setInitializingAttributes] = useState(false);
   const [error, setError] = useState("");
@@ -87,6 +91,9 @@ export function GameView({
   }
 
   useEffect(() => {
+    setFateInterventionOpen(false);
+    setFateInstruction("");
+    setFateIntervening(false);
     void refreshState().catch((reason: unknown) => {
       setError(reason instanceof Error ? reason.message : "无法读取游戏状态");
     });
@@ -100,6 +107,7 @@ export function GameView({
     if (
       (turnHistory.length > 0 && viewedTurnIndex !== turnHistory.length - 1)
       || courses?.course_selection?.status === "pending"
+      || state?.school?.departure_notice?.status === "pending"
     ) return;
     setLoading(true);
     setError("");
@@ -121,6 +129,38 @@ export function GameView({
     }
   }
 
+  async function submitFateIntervention() {
+    const instruction = fateInstruction.trim();
+    if (
+      !instruction
+      || instruction.length > 2000
+      || !isViewingLatest
+      || courseSelectionPending
+      || departureNoticePending
+      || lifecycle.status === "dead"
+    ) return;
+    setLoading(true);
+    setFateIntervening(true);
+    setError("");
+    try {
+      const nextTurn = await api.action(sessionId, {
+        client_action_id: crypto.randomUUID(),
+        expected_state_version: stateVersion,
+        kind: "fate_intervention",
+        fate_instruction: instruction,
+      });
+      setTurn(nextTurn);
+      await refreshState();
+      setFateInstruction("");
+      setFateInterventionOpen(false);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "干涉命运失败");
+    } finally {
+      setFateIntervening(false);
+      setLoading(false);
+    }
+  }
+
   const player = state ?? {};
   const identity = player.identity ?? {};
   const context = player.current_context ?? {};
@@ -128,6 +168,7 @@ export function GameView({
   const resources = player.resources ?? {};
   const dimensions = player.dimensions ?? {};
   const lifecycle = player.lifecycle ?? {};
+  const departureNotice = player.school?.departure_notice ?? {};
   const attributeInitialization = player.attribute_initialization ?? {};
   const latestTurnIndex = turnHistory.length - 1;
   const isViewingLatest = turnHistory.length === 0 || viewedTurnIndex === latestTurnIndex;
@@ -143,6 +184,30 @@ export function GameView({
   const displayWorldline = visibleResponse?.worldline ?? worldline;
   const hasStarted = turnHistory.length > 0 || journal.length > 0 || turn !== null;
   const courseSelectionPending = courses?.course_selection?.status === "pending";
+  const departureNoticePending = departureNotice.status === "pending";
+  const currentNodeWasFateIntervention = viewedTurn?.action?.kind === "fate_intervention";
+  const fateInterventionDisabled = (
+    !isViewingLatest
+    || loading
+    || courseSelectionPending
+    || departureNoticePending
+    || lifecycle.status === "dead"
+  );
+
+  async function acknowledgeDepartureNotice() {
+    if (!departureNoticePending || acknowledgingDeparture) return;
+    setAcknowledgingDeparture(true);
+    setError("");
+    try {
+      const response = await api.acknowledgeDepartureNotice(sessionId);
+      setState(response.state);
+      setStateVersion(response.state_version);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "开除通知确认失败");
+    } finally {
+      setAcknowledgingDeparture(false);
+    }
+  }
 
   const npcNames = useMemo(
     () => Object.fromEntries(
@@ -182,6 +247,13 @@ export function GameView({
   if (activeMenu !== "剧情") {
     return (
       <div className="query-panel">
+        {departureNoticePending && (
+          <DepartureNoticePanel
+            notice={departureNotice}
+            acknowledging={acknowledgingDeparture}
+            onAcknowledge={() => void acknowledgeDepartureNotice()}
+          />
+        )}
         {error && <div className="error-banner">{error}</div>}
         {activeMenu === "角色" && (
           <>
@@ -217,12 +289,31 @@ export function GameView({
             ))}
           </div>
         )}
-        {activeMenu === "关系与好感" && (
+        {activeMenu === "羁绊" && (
           <div className="relationship-list">
             {relationshipRows.length === 0 ? <EmptyText text="你还没有与任何人建立足以记录的羁绊。" /> : relationshipRows.map((item) => (
               <article className="relationship-row" key={item.target_id}>
-                <div><strong>{item.name}</strong><small>{translateValue(item.state.stage ?? "stranger")}</small></div>
-                <span>好感 {item.state.affinity ?? 0} · 信任 {item.state.trust ?? 0}</span>
+                <div>
+                  <strong>{item.name}</strong>
+                  <small>
+                    {translateValue(item.state.stage ?? "stranger")}
+                    {" · "}
+                    {translateValue(item.state.bond_type ?? "potential")}
+                  </small>
+                </div>
+                <span>好感 {item.state.affinity ?? 0}/100 · 信任 {item.state.trust ?? 0}/100</span>
+                {getRomanceStage(item.state) !== "none" && getRomanceStage(item.state) !== "locked" && (
+                  <small className="bond-detail">恋爱阶段：{translateValue(getRomanceStage(item.state))}</small>
+                )}
+                {item.state.last_change?.reason && (
+                  <small className="bond-detail">最近变化：{item.state.last_change.reason}</small>
+                )}
+                {Array.isArray(item.state.pending_unlocks ?? item.state.pending_stage_unlocks)
+                  && (item.state.pending_unlocks ?? item.state.pending_stage_unlocks).length > 0 && (
+                  <small className="bond-detail">
+                    有 {(item.state.pending_unlocks ?? item.state.pending_stage_unlocks).length} 个阶段等待条件解锁
+                  </small>
+                )}
               </article>
             ))}
           </div>
@@ -231,8 +322,9 @@ export function GameView({
           <div className="relationship-list romance-list">
             {romanceRows.length === 0 ? <EmptyText text="心形墨水尚未为任何名字显色。真正的悸动，也许会在未来某个走廊转角出现。" /> : romanceRows.map((item) => (
               <article className="relationship-row romance-row" key={item.target_id}>
-                <div><strong>{item.name}</strong><small>{translateValue(item.state.stage ?? item.state.romance_state)}</small></div>
-                <span>好感 {item.state.affinity ?? 0} · 信任 {item.state.trust ?? 0}</span>
+                <div><strong>{item.name}</strong><small>{translateValue(getRomanceStage(item.state))}</small></div>
+                <span>好感 {item.state.affinity ?? 0}/100 · 信任 {item.state.trust ?? 0}/100</span>
+                <small className="bond-detail">普通关系：{translateValue(item.state.stage ?? "stranger")}</small>
               </article>
             ))}
           </div>
@@ -276,11 +368,14 @@ export function GameView({
             }}
           />
         )}
-        {["声望", "信件"].includes(activeMenu) && (
+        {activeMenu === "声望" && (
+          <ReputationPanel value={player.reputation} />
+        )}
+        {activeMenu === "信件" && (
           <ReadableSection
-            title={activeMenu === "声望" ? "魔法社会中的名声" : "猫头鹰邮递"}
-            data={player[activeMenu === "声望" ? "reputation" : "letters"] ?? {}}
-            emptyText={activeMenu === "信件" ? "猫头鹰棚里暂时没有寄给你的新信。" : "这页羊皮纸暂时没有可显示的记录。"}
+            title="猫头鹰邮递"
+            data={player.letters ?? {}}
+            emptyText="猫头鹰棚里暂时没有寄给你的新信。"
           />
         )}
       </div>
@@ -320,6 +415,19 @@ export function GameView({
     );
   }
 
+  if (departureNoticePending) {
+    return (
+      <section className="game-panel" aria-label="退学通知">
+        {error && <div className="error-banner">{error}</div>}
+        <DepartureNoticePanel
+          notice={departureNotice}
+          acknowledging={acknowledgingDeparture}
+          onAcknowledge={() => void acknowledgeDepartureNotice()}
+        />
+      </section>
+    );
+  }
+
   return (
     <section className="game-panel" aria-label="剧情档案">
       {error && <div className="error-banner">{error}</div>}
@@ -332,8 +440,8 @@ export function GameView({
       ) : loading ? (
         <div className="magic-loading" role="status" aria-live="polite">
           <div className="magic-orbit" aria-hidden="true"><MagicWand /></div>
-          <h3>羽毛笔正在书写命运</h3>
-          <p>魔法回响穿过时间与空间，命运正在为你编织下一幕……</p>
+          <h3>{fateIntervening ? "命运的墨迹正在改道" : "羽毛笔正在书写命运"}</h3>
+          <p>{fateIntervening ? "羽毛笔正在为现实寻找一条通往你所指定未来的道路……" : "魔法回响穿过时间与空间，命运正在为你编织下一幕……"}</p>
         </div>
       ) : (
         <>
@@ -357,11 +465,17 @@ export function GameView({
             <>
               <article className="narrative-card">
                 <p className="eyebrow">{translateSceneType(visibleResponse?.turn.scene_type)}</p>
+                {currentNodeWasFateIntervention && <span className="fate-badge">命运干涉</span>}
                 <h3>{visibleResponse?.turn.title ?? "最近的故事"}</h3>
                 <p className="narrative-text">
                   {visibleResponse?.turn.narrative ?? journal[0]?.summary ?? "羽毛笔悬停在羊皮纸上，等待你写下下一步行动。"}
                 </p>
-                {visibleResponse && <ChangeNotice changes={visibleResponse.applied_changes} />}
+                {visibleResponse && (
+                  <ChangeNotice
+                    changes={visibleResponse.applied_changes}
+                    npcNames={npcNames}
+                  />
+                )}
               </article>
               {!isViewingLatest && (
                 <p className="story-browse-note" role="status">
@@ -422,6 +536,58 @@ export function GameView({
                   </button>
                 </div>
               )}
+              <section className={`fate-intervention ${fateInterventionOpen ? "is-open" : ""}`} aria-label="干涉命运">
+                {!fateInterventionOpen ? (
+                  <button
+                    className="fate-intervention-trigger"
+                    disabled={fateInterventionDisabled}
+                    onClick={() => setFateInterventionOpen(true)}
+                  >
+                    <span>
+                      <strong>干涉命运</strong>
+                      <small>作弊模式：直接指定下一个剧情节点想要发生的事情。</small>
+                    </span>
+                    <span aria-hidden="true">✦</span>
+                  </button>
+                ) : (
+                  <div className="fate-intervention-form">
+                    <div className="fate-intervention-heading">
+                      <div>
+                        <p className="eyebrow">作弊模式 · 命运改道</p>
+                        <h3>你希望接下来发生什么？</h3>
+                      </div>
+                      <span className="fate-counter">{fateInstruction.length}/2000</span>
+                    </div>
+                    <p className="fate-intervention-help">
+                      当前节点会在成功生成下一幕后结束。请描述你希望下一节点实际发生的核心事件，羽毛笔会负责补足自然过渡。
+                    </p>
+                    <textarea
+                      aria-label="你希望接下来发生什么"
+                      maxLength={2000}
+                      disabled={fateIntervening || fateInterventionDisabled}
+                      value={fateInstruction}
+                      onChange={(event) => setFateInstruction(event.target.value)}
+                      placeholder="例如：下一幕让我在禁书区发现一本记载着我家族秘密的无名书。"
+                    />
+                    <div className="fate-intervention-actions">
+                      <button
+                        className="secondary-button"
+                        disabled={fateIntervening}
+                        onClick={() => setFateInterventionOpen(false)}
+                      >
+                        取消
+                      </button>
+                      <button
+                        className="fate-submit-button"
+                        disabled={fateInterventionDisabled || !fateInstruction.trim()}
+                        onClick={() => void submitFateIntervention()}
+                      >
+                        {fateIntervening ? "命运改道中…" : "干涉命运并结束当前节点"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </section>
             </>
           )}
         </>
@@ -582,6 +748,108 @@ function Stat({ label, value }: { label: string; value: string }) {
   return <div className="stat"><span>{label}</span><strong>{value}</strong></div>;
 }
 
+function DepartureNoticePanel({
+  notice,
+  acknowledging,
+  onAcknowledge,
+}: {
+  notice: Record<string, any>;
+  acknowledging: boolean;
+  onAcknowledge: () => void;
+}) {
+  return (
+    <section className="departure-notice-panel" role="alertdialog" aria-modal="true" aria-labelledby="departure-notice-title">
+      <p className="eyebrow">学籍状态变更</p>
+      <h2 id="departure-notice-title">{notice.title || "霍格沃兹离校通知"}</h2>
+      <p>{notice.message || "你的学籍已经终止，课程已清空，请尽快离开学校。"}</p>
+      <p className="departure-notice-help">确认后，剧情会继续记录你的离校状态；你不能再以普通学生身份返回学校。</p>
+      <button className="primary-button" disabled={acknowledging} onClick={onAcknowledge}>
+        {acknowledging ? "正在确认…" : "确认并离开学校"}
+      </button>
+    </section>
+  );
+}
+
+function ReputationPanel({ value }: { value: unknown }) {
+  const reputation = getReputationDisplay(value);
+  const position = ((reputation.score + 100) / 200) * 100;
+  const deltaLabel = reputation.lastDelta > 0
+    ? `本回合声望上升 +${reputation.lastDelta}`
+    : reputation.lastDelta < 0
+      ? `本回合声望下降 ${reputation.lastDelta}`
+      : "本回合声望没有变化";
+
+  return (
+    <div className="reputation-panel">
+      <section className="reputation-hero" aria-label="当前声望">
+        <p className="eyebrow">魔法社会中的名声</p>
+        <div className={`reputation-score ${reputation.score > 0 ? "positive" : reputation.score < 0 ? "negative" : "neutral"}`}>
+          {reputation.score > 0 ? "+" : ""}{reputation.score}
+        </div>
+        <h2>{reputation.levelName}</h2>
+        <p>{reputation.alignment}</p>
+      </section>
+      <section className="reputation-scale" aria-label="声望刻度">
+        <div className="reputation-scale-labels">
+          <span>黑暗倾向 −100</span>
+          <span>中立 0</span>
+          <span>白巫师倾向 +100</span>
+        </div>
+        <div className="reputation-track">
+          <span className="reputation-marker" style={{ left: `${position}%` }} aria-label={`当前声望 ${reputation.score}`} />
+        </div>
+      </section>
+      <section className="reputation-description">
+        <h3>当前影响</h3>
+        <p>{reputation.description}</p>
+        <p className="muted">
+          {reputation.score > 10
+            ? "陌生人和关键人物通常更愿意先听你解释，并在合理范围内提供帮助。"
+            : reputation.score < -10
+              ? "陌生人和管理者通常会更谨慎地对待你，可能要求额外证明或担保。"
+              : "你还没有在魔法社会中留下明确的善恶印象，NPC 会更多依据当前行为判断你。"}
+        </p>
+      </section>
+      <section className="reputation-latest">
+        <h3>最近变化</h3>
+        <div className={`reputation-change ${reputation.lastDelta > 0 ? "positive" : reputation.lastDelta < 0 ? "negative" : "neutral"}`}>
+          <strong>{deltaLabel}</strong>
+          {reputation.lastReason && <span>{reputation.lastReason}</span>}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function getReputationDisplay(value: unknown) {
+  const raw = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  const scoreValue = typeof raw.score === "number" && Number.isFinite(raw.score) ? raw.score : 0;
+  const score = Math.max(-100, Math.min(100, Math.trunc(scoreValue)));
+  const levels = [
+    { name: "黑暗典范", min: -100, max: -81, alignment: "强烈偏向黑巫师", description: "声名极其恶劣，接近被整个社会视为重大威胁。" },
+    { name: "黑巫师", min: -80, max: -61, alignment: "偏向黑巫师", description: "公开被视为危险的黑巫师或黑魔法倾向者。" },
+    { name: "危险人物", min: -60, max: -31, alignment: "偏向黑暗", description: "被认为可能伤害他人或为了目的不择手段。" },
+    { name: "可疑倾向", min: -30, max: -11, alignment: "轻微负面", description: "行为动机不稳定，别人会多问一句、多观察一步。" },
+    { name: "中立", min: -10, max: 10, alignment: "中立倾向", description: "尚无明确的善恶或阵营印象。" },
+    { name: "友善倾向", min: 11, max: 30, alignment: "轻微正面", description: "通常被看作善意、愿意合作，但还没有形成强烈公众声誉。" },
+    { name: "正直可靠", min: 31, max: 60, alignment: "正面倾向", description: "多数普通巫师愿意相信其动机。" },
+    { name: "白巫师", min: 61, max: 80, alignment: "偏向白巫师", description: "明显站在正义和保护弱者的一侧。" },
+    { name: "光明典范", min: 81, max: 100, alignment: "强烈偏向白巫师", description: "被普遍认为是极其正直、可靠且愿意保护他人的巫师。" },
+  ];
+  const level = levels.find((item) => item.min <= score && score <= item.max) ?? levels[4];
+  const lastDelta = typeof raw.last_delta === "number" && Number.isFinite(raw.last_delta)
+    ? Math.max(-10, Math.min(10, Math.trunc(raw.last_delta)))
+    : 0;
+  return {
+    score,
+    levelName: level.name,
+    alignment: level.alignment,
+    description: level.description,
+    lastDelta,
+    lastReason: typeof raw.last_reason === "string" ? raw.last_reason : "",
+  };
+}
+
 function formatStoryDate(value: unknown): string | null {
   if (typeof value !== "string" || !value) return null;
   const match = value.match(/^\d{4}-\d{2}-\d{2}/);
@@ -613,6 +881,8 @@ const FIELD_LABELS: Record<string, string> = {
   level: "熟练度",
   experience: "经验",
   source: "来源",
+  course_id: "课程",
+  course_skill: "课程技能",
   inventory: "随身物品",
   pet: "宠物伙伴",
   name: "名称",
@@ -629,6 +899,8 @@ const FIELD_LABELS: Record<string, string> = {
   affinity: "好感",
   trust: "信任",
   romance_state: "恋爱状态",
+  romance_stage: "恋爱阶段",
+  bond_type: "羁绊类型",
   known_secrets: "已知秘密",
   pending_stage_unlocks: "待解锁阶段",
   galleons: "加隆",
@@ -650,6 +922,10 @@ const VALUE_LABELS: Record<string, string> = {
   acquaintance: "相识",
   friend: "朋友",
   close_friend: "挚友",
+  estranged: "疏远",
+  hostile: "敌对",
+  locked: "尚未开放",
+  none: "暂无恋爱关系",
   dating: "恋爱",
   romance: "恋爱",
   lover: "恋人",
@@ -659,6 +935,14 @@ const VALUE_LABELS: Record<string, string> = {
   married: "已婚",
   unavailable: "尚未开启",
   single: "单身",
+  multiple_bonds: "多段羁绊",
+  potential: "潜在羁绊",
+  friendship: "友情",
+  rivalry: "竞争关系",
+  mentor: "师生羁绊",
+  family: "家人",
+  professional: "工作关系",
+  other: "其他羁绊",
   normal: "正常",
   positive: "正面",
   negative: "负面",
@@ -683,6 +967,24 @@ const VALUE_LABELS: Record<string, string> = {
   ready_for_first_scene: "等待命运启程",
   true: "是",
   false: "否",
+};
+
+const COURSE_LABELS: Record<string, string> = {
+  transfiguration: "变形术",
+  charms: "咒语",
+  potions: "魔药",
+  history_of_magic: "魔法史",
+  defence_against_dark_arts: "黑魔法防御术",
+  astronomy: "天文学",
+  herbology: "草药学",
+  flying: "飞行课",
+  arithmancy: "算术占卜",
+  muggle_studies: "麻瓜研究",
+  divination: "占卜",
+  ancient_runes: "古代魔文研究",
+  care_of_magical_creatures: "神奇动物保护",
+  alchemy: "炼金术",
+  apparition: "幻影移形",
 };
 
 function ReadableSection({
@@ -717,7 +1019,7 @@ function ReadableValue({ value, fieldName }: { value: unknown; fieldName?: strin
       <div className="readable-list">
         {value.map((item, index) => (
           <div className="readable-list-item" key={`${fieldName ?? "item"}-${index}`}>
-            <ReadableValue value={item} />
+            <ReadableValue value={item} fieldName={fieldName} />
           </div>
         ))}
       </div>
@@ -737,7 +1039,7 @@ function ReadableValue({ value, fieldName }: { value: unknown; fieldName?: strin
       </div>
     );
   }
-  return <span className="readable-value">{translateValue(value)}</span>;
+  return <span className="readable-value">{translateValue(value, fieldName)}</span>;
 }
 
 function isEmptyData(data: unknown): boolean {
@@ -757,14 +1059,21 @@ function isHiddenField(key: string, value: unknown): boolean {
 function translateField(key: string): string {
   if (FIELD_LABELS[key]) return FIELD_LABELS[key];
   if (NPC_NAMES[key]) return NPC_NAMES[key];
+  if (COURSE_LABELS[key.toLowerCase()]) return COURSE_LABELS[key.toLowerCase()];
   return key
     .replaceAll("_", " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-function translateValue(value: unknown): string {
+function translateValue(value: unknown, fieldName?: string): string {
   if (typeof value === "boolean") return value ? "是" : "否";
   const text = String(value);
+  if (fieldName === "course_id" || fieldName === "id" || fieldName === "skill_id") {
+    return COURSE_LABELS[text.toLowerCase()] ?? text;
+  }
+  if (fieldName === "active_courses" || fieldName === "selected_courses") {
+    return COURSE_LABELS[text.toLowerCase()] ?? text;
+  }
   return VALUE_LABELS[text] ?? NPC_NAMES[text] ?? text;
 }
 
@@ -800,8 +1109,24 @@ function isRomanticRelationship(state: Record<string, any>): boolean {
     "marriage",
     "married",
   ]);
-  return romanticStages.has(String(state.stage ?? "")) ||
-    romanticStages.has(String(state.romance_state ?? ""));
+  return romanticStages.has(getRomanceStage(state));
+}
+
+function getRomanceStage(state: Record<string, any>): string {
+  const canonical = String(state.romance_stage ?? "");
+  if (canonical) return canonical;
+  const legacyRomance = String(state.romance_state ?? "");
+  if (legacyRomance && legacyRomance !== "unavailable") return legacyRomance;
+  const legacyStage = String(state.stage ?? "");
+  return [
+    "dating",
+    "romance",
+    "lover",
+    "committed",
+    "adult_stage",
+    "marriage",
+    "married",
+  ].includes(legacyStage) ? legacyStage : "none";
 }
 
 function EmptyText({ text }: { text: string }) {
@@ -853,7 +1178,13 @@ function ChoiceEffects({
   );
 }
 
-function ChangeNotice({ changes }: { changes: PlayerChanges }) {
+function ChangeNotice({
+  changes,
+  npcNames,
+}: {
+  changes: PlayerChanges;
+  npcNames: Record<string, string>;
+}) {
   if (!changes || !hasChanges(changes)) return null;
   return (
     <div className="change-notice">
@@ -864,6 +1195,9 @@ function ChangeNotice({ changes }: { changes: PlayerChanges }) {
           ...changes.status_add.map((item) => `状态：${item.name ?? item.id}`),
           ...changes.skill_add.map((item) => `技能：${item.name ?? item.id}`),
           ...changes.trait_add.map((item) => `词条：${item.name}`),
+          ...(changes.relationship_creations ?? []).map(
+            (item) => `新羁绊：${item.character?.name ?? "未留名的巫师"}`,
+          ),
         ]} />
         <ChangeList title="失去" items={[
           ...changes.inventory_remove.map((item) => `物品：${item}`),
@@ -881,6 +1215,9 @@ function ChangeNotice({ changes }: { changes: PlayerChanges }) {
           ),
           ...changes.dimension_deltas.map((item) =>
             `${dimensionLabel(item.id)}：${formatDelta(item.delta)}${item.reason ? `（${item.reason}）` : ""}`,
+          ),
+          ...(changes.relationship_deltas ?? []).map((item) =>
+            `羁绊 ${npcNames[item.npc_id] ?? NPC_NAMES[item.npc_id] ?? item.npc_id}：好感 ${formatDelta(item.affinity_delta ?? 0)}，信任 ${formatDelta(item.trust_delta ?? 0)}${item.reason ? `（${item.reason}）` : ""}`,
           ),
         ]} />
       </div>
@@ -908,7 +1245,9 @@ function hasChanges(changes: PlayerChanges): boolean {
     changes.resource_deltas.length ||
     changes.dimension_deltas.length ||
     changes.resource_cap_deltas.length ||
-    changes.dimension_cap_deltas.length,
+    changes.dimension_cap_deltas.length ||
+    (changes.relationship_deltas ?? []).length ||
+    (changes.relationship_creations ?? []).length,
   );
 }
 

@@ -198,6 +198,35 @@ def get_game_state(
     )
 
 
+@router.post(
+    "/sessions/{session_id}/departure-notice/acknowledge",
+    response_model=PlayerStateResponse,
+)
+def acknowledge_departure_notice(
+    session_id: str,
+    db: Session = Depends(get_db),
+) -> PlayerStateResponse:
+    game_session = _require_session(db, session_id)
+    player_state = get_player_state(db, session_id)
+    if player_state is None:
+        raise HTTPException(status_code=404, detail="角色状态不存在")
+    state = dict(player_state.state)
+    school = dict(state.get("school", {}))
+    notice = dict(school.get("departure_notice", {}))
+    if notice.get("status") == "pending":
+        notice["status"] = "acknowledged"
+        school["departure_notice"] = notice
+        state["school"] = school
+        player_state.state = state
+        game_session.state_version += 1
+        db.commit()
+    return PlayerStateResponse(
+        session_id=session_id,
+        state_version=game_session.state_version,
+        state=player_state.state,
+    )
+
+
 @router.get("/sessions/{session_id}/courses", response_model=CourseView)
 def get_game_courses(
     session_id: str,

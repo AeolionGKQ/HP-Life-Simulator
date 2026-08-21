@@ -2,6 +2,14 @@ from backend.app.content.eras import ERAS
 from backend.app.schemas.game import SetupOption, SetupStep
 
 
+STARTING_POINT_IDS = {
+    "before_first_letter",
+    "diagon_alley",
+    "platform_nine_three_quarters",
+    "sorting_ceremony",
+}
+
+
 def option(
     option_id: str,
     label: str,
@@ -254,13 +262,14 @@ SETUP_STEPS = [
     SetupStep(
         step=14,
         title="剧情起点",
-        description="选择故事真正开始的时刻。越晚的起点会略过此前流程，但不会抹去角色背景。",
+        description="从已经编排好的剧情节点中选择故事真正开始的时刻。越晚的起点会略过此前流程，但不会抹去角色背景。",
         options=[
-            option("before_first_letter", "收到霍格沃茨来信之前", "从魔法尚未得到解释的普通早晨开始。"),
-            option("diagon_alley", "第一次踏入对角巷", "从采购魔杖、长袍、课本和坩埚开始。"),
-            option("platform_nine_three_quarters", "九又四分之三站台", "从蒸汽、猫头鹰叫声和即将启程的列车开始。"),
-            option("sorting_ceremony", "分院时", "直接从礼堂的烛光、四张长桌和分院帽落到头顶的那一刻开始。"),
+            option("before_first_letter", "收到霍格沃茨来信之前", "从魔法尚未得到解释的普通早晨开始。", value="before_first_letter"),
+            option("diagon_alley", "第一次踏入对角巷", "从采购魔杖、长袍、课本和坩埚开始。", value="diagon_alley"),
+            option("platform_nine_three_quarters", "九又四分之三站台", "从蒸汽、猫头鹰叫声和即将启程的列车开始。", value="platform_nine_three_quarters"),
+            option("sorting_ceremony", "分院时", "直接从礼堂的烛光、四张长桌和分院帽落到头顶的那一刻开始。", value="sorting_ceremony"),
         ],
+        selection_mode="single",
     ),
     SetupStep(
         step=15,

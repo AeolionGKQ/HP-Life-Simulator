@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from backend.app.content.setup import get_setup_step
+from backend.app.content.setup import STARTING_POINT_IDS, get_setup_step
 from backend.app.content.eras import ERA_BY_ID, get_era
 from backend.app.models import (
     GameSession,
@@ -68,6 +68,10 @@ def save_setup_answer(
         "slytherin",
     }:
         raise ValueError("学院只能从四个学院中选择")
+    if payload.step == 14:
+        starting_point = _starting_point_id(payload.answer)
+        if starting_point not in STARTING_POINT_IDS:
+            raise ValueError("剧情起点只能从当前提供的预设节点中选择")
 
     answers = setup.setdefault("answers", {})
     answers[str(payload.step)] = payload.answer
@@ -378,6 +382,8 @@ def _seed_npcs_and_relationships(db: Session, session_id: str) -> None:
                     "fears": [],
                     "secrets": [],
                     "emotion": "neutral",
+                    "origin": "preset",
+                    "age_reference_date": "1991-07-01",
                 },
             )
         )
@@ -390,9 +396,13 @@ def _seed_npcs_and_relationships(db: Session, session_id: str) -> None:
                     "affinity": 0,
                     "trust": 0,
                     "stage": "stranger",
+                    "bond_type": "potential",
                     "romance_state": "unavailable",
+                    "romance_stage": "none",
                     "known_secrets": [],
                     "recent_interaction_ids": [],
+                    "pending_unlocks": [],
+                    "origin": "preset",
                 },
             )
         )
@@ -463,12 +473,16 @@ def seed_initial_friends(
                     "role": "学生",
                     "personality": "由玩家在创建角色时设定的童年好友",
                     "age": 11,
+                    "age_band": "minor",
+                    "age_reference_date": "1991-07-01",
                     "location_id": "unknown",
                     "schedule": [],
                     "goals": [],
                     "fears": [],
                     "secrets": [],
                     "emotion": "friendly",
+                    "origin": "player_created",
+                    "age_reference_date": "1991-07-01",
                 },
             )
             db.add(npc)
@@ -489,9 +503,13 @@ def seed_initial_friends(
             "affinity": max(20, int(relationship.state.get("affinity", 0))),
             "trust": max(10, int(relationship.state.get("trust", 0))),
             "stage": "friend",
+            "bond_type": "friendship",
             "romance_state": relationship.state.get("romance_state", "unavailable"),
+            "romance_stage": relationship.state.get("romance_stage", "none"),
             "known_secrets": relationship.state.get("known_secrets", []),
             "recent_interaction_ids": relationship.state.get(
                 "recent_interaction_ids", []
             ),
+            "pending_unlocks": relationship.state.get("pending_unlocks", []),
+            "origin": relationship.state.get("origin", "player_created"),
         }

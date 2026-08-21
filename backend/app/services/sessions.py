@@ -61,6 +61,13 @@ def initial_player_state() -> dict[str, Any]:
             "active_courses": [],
             "course_selection": None,
             "course_history": [],
+            "departure_notice": {
+                "status": "none",
+                "notice_id": None,
+                "reason": None,
+                "title": "",
+                "message": "",
+            },
         },
         "statuses": [],
         "skills": {},
@@ -77,9 +84,18 @@ def initial_player_state() -> dict[str, Any]:
             "location_id": "home",
             "activity": "character_setup",
         },
-        "reputation": {},
+        "reputation": {
+            "score": 0,
+            "level_id": "neutral",
+            "level_name": "中立",
+            "alignment": "中立倾向",
+            "last_delta": 0,
+            "last_reason": "",
+        },
         "romance": {
             "status": "single",
+            "active_relationship_ids": [],
+            "primary_relationship_id": None,
             "pending_stage_unlocks": [],
         },
         "worldline": {

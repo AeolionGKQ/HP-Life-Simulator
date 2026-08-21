@@ -134,6 +134,7 @@ class ChoiceEffect(BaseModel):
         "dimension",
         "resource_cap",
         "dimension_cap",
+        "reputation",
         "relationship",
     ]
     direction: Literal["gain", "loss", "change"]
@@ -144,6 +145,100 @@ class ChoiceEffects(BaseModel):
     gains: list[ChoiceEffect] = []
     losses: list[ChoiceEffect] = []
     note: str = ""
+
+
+class RelationshipDeltaProposal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    npc_id: str = Field(min_length=1, max_length=100)
+    affinity_delta: int = Field(default=0, ge=-10, le=10, strict=True)
+    trust_delta: int = Field(default=0, ge=-10, le=10, strict=True)
+    stage: Literal[
+        "stranger",
+        "acquaintance",
+        "friend",
+        "close_friend",
+        "estranged",
+        "hostile",
+    ] | None = None
+    romance_stage: Literal[
+        "locked",
+        "none",
+        "dating",
+        "committed",
+        "adult_stage",
+        "marriage",
+    ] | None = None
+    bond_type: Literal[
+        "potential",
+        "friendship",
+        "rivalry",
+        "mentor",
+        "family",
+        "professional",
+        "romance",
+        "other",
+    ] | None = None
+    reason: str = Field(default="", max_length=500)
+    evidence: str = Field(default="", max_length=500)
+
+
+class NewRelationshipCharacterProposal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=80)
+    role: str = Field(default="巫师", max_length=80)
+    age: int | None = Field(default=None, ge=0, le=150, strict=True)
+    birthday: str | None = Field(default=None, max_length=30)
+    age_band: Literal["child", "minor", "adult", "unknown"] = "unknown"
+    location_id: str = Field(default="unknown", max_length=100)
+    personality: str = Field(default="", max_length=500)
+    appearance: str = Field(default="", max_length=500)
+    goals: list[str] = Field(default_factory=list, max_length=5)
+    fears: list[str] = Field(default_factory=list, max_length=5)
+    aliases: list[str] = Field(default_factory=list, max_length=5)
+
+
+class NewRelationshipBondProposal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    bond_type: Literal[
+        "potential",
+        "friendship",
+        "rivalry",
+        "mentor",
+        "family",
+        "professional",
+        "romance",
+        "other",
+    ] = "potential"
+    affinity_delta: int = Field(default=0, ge=-10, le=10, strict=True)
+    trust_delta: int = Field(default=0, ge=-10, le=10, strict=True)
+    stage: Literal[
+        "stranger",
+        "acquaintance",
+        "friend",
+        "close_friend",
+        "estranged",
+        "hostile",
+    ] = "stranger"
+    romance_stage: Literal[
+        "locked",
+        "none",
+        "dating",
+        "committed",
+        "adult_stage",
+        "marriage",
+    ] = "none"
+
+
+class RelationshipCreationProposal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    character: NewRelationshipCharacterProposal
+    bond: NewRelationshipBondProposal = NewRelationshipBondProposal()
+    reason: str = Field(default="", max_length=500)
+    evidence: str = Field(default="", max_length=500)
 
 
 class PlayerChanges(BaseModel):
@@ -164,7 +259,13 @@ class PlayerChanges(BaseModel):
     resource_cap_deltas: list[ResourceCapDelta] = []
     dimension_cap_deltas: list[DimensionCapDelta] = []
     reputation_deltas: dict[str, int] = {}
+    relationship_deltas: list[RelationshipDeltaProposal] = []
+    relationship_creations: list[RelationshipCreationProposal] = []
+
+
+class AppliedPlayerChanges(PlayerChanges):
     relationship_deltas: list[dict[str, Any]] = []
+    relationship_creations: list[dict[str, Any]] = []
 
 
 GRADE_ID = Literal[
@@ -265,7 +366,7 @@ class NarrativeResponse(BaseModel):
     choices: list[Choice]
     state_proposals: dict[str, Any] = {}
     player_changes: PlayerChanges = PlayerChanges()
-    applied_changes: PlayerChanges = PlayerChanges()
+    applied_changes: AppliedPlayerChanges = AppliedPlayerChanges()
     worldline: WorldlineResponse
     events: list[dict[str, Any]] = []
     memory_update: MemoryUpdate = MemoryUpdate()
@@ -280,9 +381,32 @@ class MemoryRequest(BaseModel):
 class ActionRequest(BaseModel):
     client_action_id: str = Field(min_length=1, max_length=100)
     expected_state_version: int = Field(ge=0)
-    kind: Literal["choice", "free_text", "fast_forward"] = "choice"
+    kind: Literal[
+        "choice",
+        "free_text",
+        "fast_forward",
+        "fate_intervention",
+    ] = "choice"
     choice_id: str | None = None
     free_text: str | None = Field(default=None, max_length=4000)
+    fate_instruction: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def validate_fate_intervention(self) -> ActionRequest:
+        instruction = (
+            self.fate_instruction.strip()
+            if isinstance(self.fate_instruction, str)
+            else self.fate_instruction
+        )
+        self.fate_instruction = instruction
+        if self.kind == "fate_intervention":
+            if not instruction:
+                raise ValueError("干涉命运内容不能为空")
+            if self.choice_id is not None or self.free_text is not None:
+                raise ValueError("干涉命运不能同时提交普通选项或自由行动")
+        elif instruction is not None:
+            raise ValueError("只有干涉命运请求可以提交 fate_instruction")
+        return self
 
 
 class TurnResponse(BaseModel):
