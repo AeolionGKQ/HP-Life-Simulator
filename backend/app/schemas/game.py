@@ -386,26 +386,47 @@ class ActionRequest(BaseModel):
         "free_text",
         "fast_forward",
         "fate_intervention",
+        "reshape_fate",
     ] = "choice"
     choice_id: str | None = None
     free_text: str | None = Field(default=None, max_length=4000)
     fate_instruction: str | None = Field(default=None, max_length=2000)
+    reshape_instruction: str | None = Field(default=None, max_length=2000)
 
     @model_validator(mode="after")
-    def validate_fate_intervention(self) -> ActionRequest:
-        instruction = (
+    def validate_action_instructions(self) -> ActionRequest:
+        fate_instruction = (
             self.fate_instruction.strip()
             if isinstance(self.fate_instruction, str)
             else self.fate_instruction
         )
-        self.fate_instruction = instruction
+        reshape_instruction = (
+            self.reshape_instruction.strip()
+            if isinstance(self.reshape_instruction, str)
+            else self.reshape_instruction
+        )
+        self.fate_instruction = fate_instruction
+        self.reshape_instruction = reshape_instruction
         if self.kind == "fate_intervention":
-            if not instruction:
+            if not fate_instruction:
                 raise ValueError("干涉命运内容不能为空")
-            if self.choice_id is not None or self.free_text is not None:
+            if (
+                self.choice_id is not None
+                or self.free_text is not None
+                or reshape_instruction is not None
+            ):
                 raise ValueError("干涉命运不能同时提交普通选项或自由行动")
-        elif instruction is not None:
-            raise ValueError("只有干涉命运请求可以提交 fate_instruction")
+        elif self.kind == "reshape_fate":
+            if not reshape_instruction:
+                raise ValueError("重塑命运内容不能为空")
+            if (
+                self.choice_id is not None
+                or self.free_text is not None
+                or fate_instruction is not None
+            ):
+                raise ValueError("重塑命运不能同时提交普通选项、自由行动或干涉命运")
+        elif fate_instruction is not None or reshape_instruction is not None:
+            raise ValueError("只有对应的命运请求可以提交命运指令")
         return self
 
 

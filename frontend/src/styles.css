@@ -490,6 +490,37 @@ textarea:focus { border-color: var(--accent); background: #101610; outline: 0; }
 .story-navigation { display: flex; align-items: center; justify-content: space-between; gap: 14px; max-width: 900px; margin-top: 25px; padding-top: 17px; border-top: 1px solid var(--line); }
 .story-navigation > span { color: var(--muted-dark); font: 10px var(--sans); text-align: center; }
 .story-navigation .secondary-button { min-width: 110px; }
+.reshape-fate { max-width: 900px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.reshape-fate-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  width: 100%;
+  min-height: 62px;
+  padding: 14px 17px;
+  color: var(--text);
+  border: 1px solid rgba(143, 181, 139, 0.42);
+  border-radius: 7px;
+  background: linear-gradient(135deg, rgba(43, 70, 47, 0.24), rgba(210, 173, 91, 0.08));
+  text-align: left;
+}
+.reshape-fate-trigger:hover:not(:disabled) { border-color: var(--success); background: linear-gradient(135deg, rgba(43, 70, 47, 0.34), rgba(210, 173, 91, 0.12)); }
+.reshape-fate-trigger:disabled { cursor: not-allowed; opacity: 0.45; }
+.reshape-fate-trigger > span:first-child { display: grid; gap: 5px; }
+.reshape-fate-trigger strong { color: #b9d8ad; font: 650 14px var(--serif); }
+.reshape-fate-trigger small { color: var(--muted); font: 10px/1.55 var(--sans); }
+.reshape-fate-trigger > span:last-child { color: var(--accent); font-size: 20px; }
+.reshape-fate-form { padding: 20px; border: 1px solid rgba(143, 181, 139, 0.52); border-radius: 7px; background: rgba(43, 70, 47, 0.1); }
+.reshape-fate-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 15px; }
+.reshape-fate-heading h3 { margin: 5px 0 0; color: var(--text); font: 600 20px var(--serif); }
+.reshape-counter { color: var(--muted); font: 10px var(--sans); }
+.reshape-fate-help { margin: 12px 0; color: var(--muted); font: 11px/1.75 var(--sans); }
+.reshape-fate-form textarea { display: block; width: 100%; min-height: 112px; resize: vertical; }
+.reshape-fate-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 12px; }
+.reshape-submit-button { min-height: 44px; padding: 8px 13px; color: #edf7e9; border: 1px solid rgba(185, 216, 173, 0.65); border-radius: 5px; background: rgba(43, 70, 47, 0.82); font: 650 11px var(--sans); }
+.reshape-submit-button:hover:not(:disabled) { background: rgba(62, 96, 65, 0.9); }
+.reshape-submit-button:disabled { cursor: not-allowed; opacity: 0.48; }
 .fate-intervention { max-width: 900px; margin-top: 28px; padding-top: 18px; border-top: 1px solid var(--line); }
 .fate-intervention-trigger {
   display: flex;
@@ -716,6 +747,9 @@ textarea:focus { border-color: var(--accent); background: #101610; outline: 0; }
   .course-option-list,
   .course-card-grid { grid-template-columns: 1fr; }
   .course-selection-panel { padding: 16px; }
+  .reshape-fate-form { padding: 16px; }
+  .reshape-fate-actions { align-items: stretch; flex-direction: column-reverse; }
+  .reshape-fate-actions button { width: 100%; }
   .fate-intervention-form { padding: 16px; }
   .fate-intervention-actions { align-items: stretch; flex-direction: column-reverse; }
   .fate-intervention-actions button { width: 100%; }

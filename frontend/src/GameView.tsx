@@ -53,6 +53,9 @@ export function GameView({
   const [fateInterventionOpen, setFateInterventionOpen] = useState(false);
   const [fateInstruction, setFateInstruction] = useState("");
   const [fateIntervening, setFateIntervening] = useState(false);
+  const [reshapeOpen, setReshapeOpen] = useState(false);
+  const [reshapeInstruction, setReshapeInstruction] = useState("");
+  const [reshaping, setReshaping] = useState(false);
   const [acknowledgingDeparture, setAcknowledgingDeparture] = useState(false);
   const [loading, setLoading] = useState(false);
   const [initializingAttributes, setInitializingAttributes] = useState(false);
@@ -94,6 +97,9 @@ export function GameView({
     setFateInterventionOpen(false);
     setFateInstruction("");
     setFateIntervening(false);
+    setReshapeOpen(false);
+    setReshapeInstruction("");
+    setReshaping(false);
     void refreshState().catch((reason: unknown) => {
       setError(reason instanceof Error ? reason.message : "无法读取游戏状态");
     });
@@ -161,6 +167,40 @@ export function GameView({
     }
   }
 
+  async function submitReshapeFate() {
+    const instruction = reshapeInstruction.trim();
+    if (
+      !instruction
+      || instruction.length > 2000
+      || !isViewingLatest
+      || loading
+      || courseSelectionPending
+      || departureNoticePending
+      || lifecycle.status === "dead"
+      || turnHistory.length === 0
+    ) return;
+    setLoading(true);
+    setReshaping(true);
+    setError("");
+    try {
+      const nextTurn = await api.action(sessionId, {
+        client_action_id: crypto.randomUUID(),
+        expected_state_version: stateVersion,
+        kind: "reshape_fate",
+        reshape_instruction: instruction,
+      });
+      setTurn(nextTurn);
+      await refreshState();
+      setReshapeInstruction("");
+      setReshapeOpen(false);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "重塑命运失败");
+    } finally {
+      setReshaping(false);
+      setLoading(false);
+    }
+  }
+
   const player = state ?? {};
   const identity = player.identity ?? {};
   const context = player.current_context ?? {};
@@ -188,6 +228,14 @@ export function GameView({
   const currentNodeWasFateIntervention = viewedTurn?.action?.kind === "fate_intervention";
   const fateInterventionDisabled = (
     !isViewingLatest
+    || loading
+    || courseSelectionPending
+    || departureNoticePending
+    || lifecycle.status === "dead"
+  );
+  const reshapeDisabled = (
+    turnHistory.length === 0
+    || !isViewingLatest
     || loading
     || courseSelectionPending
     || departureNoticePending
@@ -276,7 +324,11 @@ export function GameView({
             <ReadableSection title="技能与熟练度" data={player.skills} emptyText="技能页还是一张等待书写的羊皮纸。" />
             <ReadableSection title="当前状态" data={player.statuses ?? []} emptyText="此刻身心平稳，没有特殊状态。" />
             <TraitSection traits={player.traits ?? []} />
-            <ReadableSection title="随身物品与宠物" data={{ inventory: player.inventory, pet: player.pet }} emptyText="口袋与行囊暂时空空如也。" />
+            <ReadableSection
+              title="随身物品与宠物"
+              data={{ inventory: displayInventory(player.inventory), pet: player.pet }}
+              emptyText="口袋与行囊暂时空空如也。"
+            />
           </>
         )}
         {activeMenu === "纪事" && (
@@ -440,8 +492,20 @@ export function GameView({
       ) : loading ? (
         <div className="magic-loading" role="status" aria-live="polite">
           <div className="magic-orbit" aria-hidden="true"><MagicWand /></div>
-          <h3>{fateIntervening ? "命运的墨迹正在改道" : "羽毛笔正在书写命运"}</h3>
-          <p>{fateIntervening ? "羽毛笔正在为现实寻找一条通往你所指定未来的道路……" : "魔法回响穿过时间与空间，命运正在为你编织下一幕……"}</p>
+          <h3>
+            {fateIntervening
+              ? "命运的墨迹正在改道"
+              : reshaping
+                ? "命运正在重新书写"
+                : "羽毛笔正在书写命运"}
+          </h3>
+          <p>
+            {fateIntervening
+              ? "羽毛笔正在为现实寻找一条通往你所指定未来的道路……"
+              : reshaping
+                ? "旧页的墨迹正在退回命运深处，重塑后的这一幕即将显现……"
+                : "魔法回响穿过时间与空间，命运正在为你编织下一幕……"}
+          </p>
         </div>
       ) : (
         <>
@@ -515,6 +579,59 @@ export function GameView({
                 ))}
                 {!visibleResponse && <EmptyText text="上一页羊皮纸已经封存，新的墨迹正等待你的选择。" />}
               </div>
+              <section className={`reshape-fate ${reshapeOpen ? "is-open" : ""}`} aria-label="重塑命运">
+                {!reshapeOpen ? (
+                  <button
+                    className="reshape-fate-trigger"
+                    disabled={reshapeDisabled}
+                    onClick={() => setReshapeOpen(true)}
+                  >
+                    <span>
+                      <strong>重塑命运</strong>
+                      <small>这一页的墨迹还没有封存？让羽毛笔重新书写本节点。</small>
+                    </span>
+                    <span aria-hidden="true">✦</span>
+                  </button>
+                ) : (
+                  <div className="reshape-fate-form">
+                    <div className="reshape-fate-heading">
+                      <div>
+                        <p className="eyebrow">命运修订 · 回溯一页</p>
+                        <h3>你希望这一幕如何重写？</h3>
+                      </div>
+                      <span className="reshape-counter">{reshapeInstruction.length}/2000</span>
+                    </div>
+                    <p className="reshape-fate-help">
+                      可以告诉羽毛笔你希望如何改变这一幕，也可以指出当前生成内容的问题。
+                      已经发生的世界状态会先被还原，再只结算重写后的版本。
+                    </p>
+                    <textarea
+                      aria-label="你希望这一幕如何重写"
+                      maxLength={2000}
+                      disabled={reshaping || reshapeDisabled}
+                      value={reshapeInstruction}
+                      onChange={(event) => setReshapeInstruction(event.target.value)}
+                      placeholder="例如：保留无名书出现的事实，但让这次相遇更缓慢一些，先通过脚步声制造悬念。"
+                    />
+                    <div className="reshape-fate-actions">
+                      <button
+                        className="secondary-button"
+                        disabled={reshaping}
+                        onClick={() => setReshapeOpen(false)}
+                      >
+                        收起羽毛笔
+                      </button>
+                      <button
+                        className="reshape-submit-button"
+                        disabled={reshapeDisabled || !reshapeInstruction.trim()}
+                        onClick={() => void submitReshapeFate()}
+                      >
+                        {reshaping ? "命运重写中…" : "重塑这一节点"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </section>
               {turnHistory.length > 0 && (
                 <div className="story-navigation" aria-label="剧情节点浏览">
                   <button
@@ -1004,6 +1121,35 @@ function ReadableSection({
   );
 }
 
+function displayItemName(item: unknown): string {
+  if (typeof item === "string" && item.trim()) return item.trim();
+  if (!item || typeof item !== "object" || Array.isArray(item)) return "未命名物品";
+
+  const record = item as Record<string, unknown>;
+  for (const key of ["name", "item_name"]) {
+    if (typeof record[key] === "string" && record[key].trim()) {
+      return record[key].trim();
+    }
+  }
+  for (const key of ["item_id", "id"]) {
+    if (typeof record[key] === "string" && record[key].trim()) {
+      return record[key].trim();
+    }
+  }
+  return "未命名物品";
+}
+
+function displayInventory(inventory: unknown): unknown {
+  if (!Array.isArray(inventory)) return inventory;
+  return inventory.map((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return item;
+    return {
+      ...(item as Record<string, unknown>),
+      name: displayItemName(item),
+    };
+  });
+}
+
 function ReadableValue({ value, fieldName }: { value: unknown; fieldName?: string }) {
   if (value === null || value === undefined || value === "") {
     return <span className="readable-empty">尚未记录</span>;
@@ -1191,7 +1337,7 @@ function ChangeNotice({
       <strong>本回合状态变化</strong>
       <div className="change-columns">
         <ChangeList title="获得" items={[
-          ...changes.inventory_add.map((item) => `物品：${item.name ?? item.item_id}`),
+          ...changes.inventory_add.map((item) => `物品：${displayItemName(item)}`),
           ...changes.status_add.map((item) => `状态：${item.name ?? item.id}`),
           ...changes.skill_add.map((item) => `技能：${item.name ?? item.id}`),
           ...changes.trait_add.map((item) => `词条：${item.name}`),

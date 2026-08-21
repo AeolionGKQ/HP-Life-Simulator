@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 import re
 import httpx
+from copy import deepcopy
 from datetime import date
 from hashlib import sha1
+from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
 
@@ -46,6 +48,229 @@ from backend.app.services.memory import get_memories_by_ids, recall_memories
 
 class TurnGenerationError(RuntimeError):
     pass
+
+
+def _memory_snapshot(memory: LongTermMemory) -> dict[str, Any]:
+    return {
+        "id": memory.id,
+        "memory_id": memory.memory_id,
+        "session_id": memory.session_id,
+        "title": memory.title,
+        "summary": memory.summary,
+        "event_type": memory.event_type,
+        "status": memory.status,
+        "importance": memory.importance,
+        "time_text": memory.time_text,
+        "location_id": memory.location_id,
+        "actors": deepcopy(memory.actors),
+        "keywords": deepcopy(memory.keywords),
+        "facts": deepcopy(memory.facts),
+        "open_threads": deepcopy(memory.open_threads),
+        "resolved_threads": deepcopy(memory.resolved_threads),
+        "source_turn_ids": deepcopy(memory.source_turn_ids),
+        "related_data": deepcopy(memory.related_data),
+    }
+
+
+def _capture_turn_state_snapshot(
+    db: Session,
+    session_id: str,
+    player_state: PlayerState,
+    npcs: list[NPCState],
+    relationships: list[Relationship],
+) -> dict[str, Any]:
+    memories = list(
+        db.scalars(
+            select(LongTermMemory).where(LongTermMemory.session_id == session_id)
+        )
+    )
+    return {
+        "player_state": deepcopy(player_state.state),
+        "npcs": [
+            {
+                "id": npc.id,
+                "npc_id": npc.npc_id,
+                "is_original_character": npc.is_original_character,
+                "state": deepcopy(npc.state),
+            }
+            for npc in npcs
+        ],
+        "relationships": [
+            {
+                "id": relationship.id,
+                "source_id": relationship.source_id,
+                "target_id": relationship.target_id,
+                "state": deepcopy(relationship.state),
+            }
+            for relationship in relationships
+        ],
+        "memories": [_memory_snapshot(memory) for memory in memories],
+    }
+
+
+def _snapshot_prompt_objects(
+    snapshot: dict[str, Any],
+) -> tuple[
+    SimpleNamespace,
+    list[SimpleNamespace],
+    list[SimpleNamespace],
+    list[SimpleNamespace],
+]:
+    player_state = SimpleNamespace(state=deepcopy(snapshot["player_state"]))
+    npcs = [
+        SimpleNamespace(
+            npc_id=item["npc_id"],
+            is_original_character=item["is_original_character"],
+            state=deepcopy(item["state"]),
+        )
+        for item in snapshot.get("npcs", [])
+    ]
+    relationships = [
+        SimpleNamespace(
+            source_id=item["source_id"],
+            target_id=item["target_id"],
+            state=deepcopy(item["state"]),
+        )
+        for item in snapshot.get("relationships", [])
+    ]
+    memories = [
+        SimpleNamespace(**deepcopy(item))
+        for item in snapshot.get("memories", [])
+    ]
+    return player_state, npcs, relationships, memories
+
+
+def _restore_turn_state_snapshot(
+    db: Session,
+    player_state: PlayerState,
+    snapshot: dict[str, Any],
+) -> None:
+    player_state.state = deepcopy(snapshot["player_state"])
+
+    snapshot_npcs = {
+        item["id"]: item
+        for item in snapshot.get("npcs", [])
+        if isinstance(item, dict) and item.get("id")
+    }
+    current_npcs = list(
+        db.scalars(
+            select(NPCState).where(NPCState.session_id == player_state.session_id)
+        )
+    )
+    current_npc_ids = {npc.id for npc in current_npcs}
+    for npc in current_npcs:
+        saved = snapshot_npcs.get(npc.id)
+        if saved is None:
+            db.delete(npc)
+            continue
+        npc.npc_id = saved["npc_id"]
+        npc.is_original_character = saved["is_original_character"]
+        npc.state = deepcopy(saved["state"])
+    for npc_id, saved in snapshot_npcs.items():
+        if npc_id not in current_npc_ids:
+            db.add(
+                NPCState(
+                    id=npc_id,
+                    session_id=player_state.session_id,
+                    npc_id=saved["npc_id"],
+                    is_original_character=saved["is_original_character"],
+                    state=deepcopy(saved["state"]),
+                )
+            )
+
+    snapshot_relationships = {
+        item["id"]: item
+        for item in snapshot.get("relationships", [])
+        if isinstance(item, dict) and item.get("id")
+    }
+    current_relationships = list(
+        db.scalars(
+            select(Relationship).where(
+                Relationship.session_id == player_state.session_id
+            )
+        )
+    )
+    current_relationship_ids = {relationship.id for relationship in current_relationships}
+    for relationship in current_relationships:
+        saved = snapshot_relationships.get(relationship.id)
+        if saved is None:
+            db.delete(relationship)
+            continue
+        relationship.source_id = saved["source_id"]
+        relationship.target_id = saved["target_id"]
+        relationship.state = deepcopy(saved["state"])
+    for relationship_id, saved in snapshot_relationships.items():
+        if relationship_id not in current_relationship_ids:
+            db.add(
+                Relationship(
+                    id=relationship_id,
+                    session_id=player_state.session_id,
+                    source_id=saved["source_id"],
+                    target_id=saved["target_id"],
+                    state=deepcopy(saved["state"]),
+                )
+            )
+
+    snapshot_memories = {
+        item["id"]: item
+        for item in snapshot.get("memories", [])
+        if isinstance(item, dict) and item.get("id")
+    }
+    current_memories = list(
+        db.scalars(
+            select(LongTermMemory).where(
+                LongTermMemory.session_id == player_state.session_id
+            )
+        )
+    )
+    current_memory_ids = {memory.id for memory in current_memories}
+    memory_fields = (
+        "memory_id",
+        "title",
+        "summary",
+        "event_type",
+        "status",
+        "importance",
+        "time_text",
+        "location_id",
+        "actors",
+        "keywords",
+        "facts",
+        "open_threads",
+        "resolved_threads",
+        "source_turn_ids",
+        "related_data",
+    )
+    for memory in current_memories:
+        saved = snapshot_memories.get(memory.id)
+        if saved is None:
+            db.delete(memory)
+            continue
+        for field in memory_fields:
+            setattr(memory, field, deepcopy(saved[field]))
+    for memory_id, saved in snapshot_memories.items():
+        if memory_id not in current_memory_ids:
+            db.add(
+                LongTermMemory(
+                    id=memory_id,
+                    session_id=player_state.session_id,
+                    memory_id=saved["memory_id"],
+                    title=saved["title"],
+                    summary=saved["summary"],
+                    event_type=saved["event_type"],
+                    status=saved["status"],
+                    importance=saved["importance"],
+                    time_text=saved["time_text"],
+                    location_id=saved["location_id"],
+                    actors=deepcopy(saved["actors"]),
+                    keywords=deepcopy(saved["keywords"]),
+                    facts=deepcopy(saved["facts"]),
+                    open_threads=deepcopy(saved["open_threads"]),
+                    resolved_threads=deepcopy(saved["resolved_threads"]),
+                    source_turn_ids=deepcopy(saved["source_turn_ids"]),
+                    related_data=deepcopy(saved["related_data"]),
+                )
+            )
 
 
 def _format_validation_error(exc: ValidationError) -> str:
@@ -341,8 +566,266 @@ def _action_text(payload: ActionRequest) -> str:
             payload.choice_id or "",
             payload.free_text or "",
             payload.fate_instruction or "",
+            payload.reshape_instruction or "",
         )
         if item
+    )
+
+
+async def _reshape_latest_turn(
+    db: Session,
+    game_session: GameSession,
+    player_state: PlayerState,
+    payload: ActionRequest,
+) -> TurnResponse:
+    settings = get_settings()
+    existing = db.scalar(
+        select(TurnRecord).where(
+            TurnRecord.session_id == game_session.id,
+            TurnRecord.client_action_id == payload.client_action_id,
+        )
+    )
+    if existing:
+        response = NarrativeResponse.model_validate(existing.llm_response)
+        return TurnResponse(
+            turn_id=existing.id,
+            sequence=existing.sequence,
+            response=response,
+            state_version=existing.state_version_after,
+        )
+    if game_session.state_version != payload.expected_state_version:
+        raise HTTPException(status_code=409, detail="存档已发生变化，请刷新后重试")
+    course_selection = player_state.state.get("school", {}).get("course_selection")
+    if isinstance(course_selection, dict) and course_selection.get("status") == "pending":
+        raise HTTPException(status_code=409, detail="请先完成当前学年的课程选择")
+    if player_state.state.get("school", {}).get("departure_notice", {}).get("status") == "pending":
+        raise HTTPException(status_code=409, detail="请先确认离校通知")
+    if player_state.state.get("lifecycle", {}).get("status") == "dead":
+        raise HTTPException(status_code=409, detail="当前角色已经无法重塑命运")
+
+    latest = db.scalar(
+        select(TurnRecord)
+        .where(TurnRecord.session_id == game_session.id)
+        .order_by(TurnRecord.sequence.desc())
+        .limit(1)
+    )
+    if latest is None:
+        raise HTTPException(status_code=409, detail="当前还没有可以重塑的剧情节点")
+    authoritative = latest.authoritative_changes
+    snapshot = authoritative.get("state_snapshot") if isinstance(authoritative, dict) else None
+    if not isinstance(snapshot, dict) or not isinstance(snapshot.get("player_state"), dict):
+        raise HTTPException(
+            status_code=409,
+            detail="当前剧情节点缺少可撤销状态快照，请先推进到新节点后再使用重塑命运",
+        )
+
+    original_response = NarrativeResponse.model_validate(latest.llm_response)
+    prompt_player_state, prompt_npcs, prompt_relationships, prompt_memories = (
+        _snapshot_prompt_objects(snapshot)
+    )
+    recent_turns = list(
+        db.scalars(
+            select(TurnRecord)
+            .where(TurnRecord.session_id == game_session.id)
+            .order_by(TurnRecord.sequence.desc())
+            .limit(settings.game.recent_narrative_turns)
+        )
+    )
+    recent_turns.reverse()
+    recent_turns = _limit_recent_turns(
+        recent_turns,
+        settings.game.recent_turn_token_limit,
+    )
+    summaries = list(
+        db.scalars(
+            select(StorySummary)
+            .where(StorySummary.session_id == game_session.id)
+            .order_by(StorySummary.updated_at.desc())
+        )
+    )
+    action = payload.model_dump()
+    action["node_to_reshape"] = {
+        "sequence": latest.sequence,
+        "turn": original_response.turn.model_dump(mode="json"),
+        "choices": [
+            choice.model_dump(mode="json")
+            for choice in original_response.choices
+        ],
+    }
+    action["reshape_base_state"] = deepcopy(snapshot["player_state"])
+    previous_offset = float(
+        snapshot["player_state"].get("worldline", {}).get("offset_rate", 0.0)
+    )
+    provider = OpenAICompatibleProvider(settings.llm)
+    messages = build_turn_messages(
+        game_session=game_session,
+        player_state=prompt_player_state,
+        npcs=prompt_npcs,
+        relationships=prompt_relationships,
+        recent_turns=recent_turns,
+        memories=prompt_memories,
+        summaries=summaries,
+        action=action,
+    )
+    parsed_response = await _request_response(
+        provider,
+        messages,
+        default_offset_rate=previous_offset,
+    )
+    recalled_ids = [memory.memory_id for memory in prompt_memories]
+    if isinstance(parsed_response, MemoryRequest):
+        requested_ids = parsed_response.memory_request.get("memory_ids", [])
+        if not isinstance(requested_ids, list):
+            raise TurnGenerationError("memory_request.memory_ids 必须是数组")
+        requested_ids = [str(memory_id) for memory_id in requested_ids][
+            : settings.game.memory_request_limit
+        ]
+        memory_by_id = {
+            memory.memory_id: memory
+            for memory in prompt_memories
+        }
+        requested_memories = [
+            memory_by_id[memory_id]
+            for memory_id in requested_ids
+            if memory_id in memory_by_id
+        ]
+        messages = build_turn_messages(
+            game_session=game_session,
+            player_state=prompt_player_state,
+            npcs=prompt_npcs,
+            relationships=prompt_relationships,
+            recent_turns=recent_turns,
+            memories=prompt_memories + requested_memories,
+            summaries=summaries,
+            action=action,
+        )
+        parsed_response = await _request_response(
+            provider,
+            messages,
+            default_offset_rate=previous_offset,
+        )
+        if isinstance(parsed_response, MemoryRequest):
+            raise TurnGenerationError("模型在一次补查后仍未返回正式剧情")
+
+    response = parsed_response
+    response.turn.current_date = original_response.turn.current_date
+    response.turn.location_id = original_response.turn.location_id
+    response.worldline.offset_rate = max(
+        settings.game.worldline_min,
+        min(settings.game.worldline_max, response.worldline.offset_rate),
+    )
+    response.worldline.delta = response.worldline.offset_rate - previous_offset
+
+    _restore_turn_state_snapshot(db, player_state, snapshot)
+    npcs = list(
+        db.scalars(select(NPCState).where(NPCState.session_id == game_session.id))
+    )
+    relationships = list(
+        db.scalars(
+            select(Relationship).where(Relationship.session_id == game_session.id)
+        )
+    )
+    accepted_date = _accepted_story_date(
+        player_state.state,
+        _parse_story_date(response.turn.current_date),
+    )
+    npc_ages = _refresh_npc_ages(npcs, accepted_date)
+    state, authoritative_changes = apply_turn_rules(
+        player_state.state,
+        relationships,
+        response,
+        npc_ages=npc_ages,
+    )
+    creation_result = _apply_relationship_creations(
+        db,
+        game_session.id,
+        payload.client_action_id,
+        response.player_changes.relationship_creations,
+        accepted_date,
+        npcs,
+        relationships,
+    )
+    if creation_result["created"]:
+        relationships.extend(creation_result["relationships"])
+        authoritative_changes["relationship_creations"] = creation_result["accepted"]
+        authoritative_changes["relationships_created"] = creation_result["created"]
+        authoritative_changes["relationship_creation_rejections"] = creation_result[
+            "rejected"
+        ]
+        refresh_romance_summary(state, relationships)
+    elif creation_result["rejected"]:
+        authoritative_changes["relationship_creation_rejections"] = creation_result[
+            "rejected"
+        ]
+    state["worldline"] = response.worldline.model_dump()
+    if state.get("lifecycle", {}).get("status") == "dead":
+        game_session.status = "ended"
+    player_state.state = state
+    visible_changes = _visible_changes(authoritative_changes)
+    response.applied_changes = AppliedPlayerChanges.model_validate(visible_changes)
+    state_version_before = game_session.state_version
+    game_session.state_version += 1
+    latest.client_action_id = payload.client_action_id
+    latest.action_type = payload.kind
+    latest.action = action
+    latest.response_type = response.response_type
+    latest.narrative = response.turn.narrative
+    latest.llm_response = response.model_dump(mode="json")
+    latest.proposed_changes = response.state_proposals
+    latest.authoritative_changes = {
+        **authoritative_changes,
+        "state_snapshot": snapshot,
+        "reshape_fate": {
+            "replaced": True,
+            "state_restored": True,
+            "state_reapplied_once": True,
+            "previous_sequence": latest.sequence,
+        },
+        "visible": visible_changes,
+        "worldline": response.worldline.model_dump(),
+    }
+    latest.memory_update = response.memory_update.model_dump()
+    latest.worldline = response.worldline.model_dump()
+    latest.prompt_version = "v1.7-reshape"
+    latest.model_name = settings.llm.model
+    latest.state_version_before = state_version_before
+    latest.state_version_after = game_session.state_version
+    _persist_memory_update(
+        db,
+        game_session.id,
+        latest.id,
+        response.memory_update.model_dump(),
+    )
+    journal = db.scalar(
+        select(JournalEntry).where(JournalEntry.turn_id == latest.id)
+    )
+    journal_summary = (
+        response.memory_update.summary.strip()
+        or response.turn.narrative[:200]
+    )
+    if journal:
+        journal.title = response.turn.title
+        journal.summary = journal_summary
+        journal.data = {"sequence": latest.sequence}
+    else:
+        db.add(
+            JournalEntry(
+                session_id=game_session.id,
+                turn_id=latest.id,
+                entry_type="turn",
+                title=response.turn.title,
+                summary=journal_summary,
+                data={"sequence": latest.sequence},
+            )
+        )
+    db.commit()
+    db.refresh(latest)
+    return TurnResponse(
+        turn_id=latest.id,
+        sequence=latest.sequence,
+        response=response,
+        state_version=latest.state_version_after,
+        recalled_memory_ids=recalled_ids,
     )
 
 
@@ -358,6 +841,9 @@ async def generate_turn(
     ).get("status")
     if game_session.status != "active" or initialization_status != "ready":
         raise HTTPException(status_code=409, detail="当前存档尚未进入可行动状态")
+
+    if payload.kind == "reshape_fate":
+        return await _reshape_latest_turn(db, game_session, player_state, payload)
 
     existing = db.scalar(
         select(TurnRecord).where(
@@ -387,6 +873,13 @@ async def generate_turn(
         db.scalars(
             select(Relationship).where(Relationship.session_id == game_session.id)
         )
+    )
+    state_snapshot = _capture_turn_state_snapshot(
+        db,
+        game_session.id,
+        player_state,
+        npcs,
+        relationships,
     )
     _refresh_npc_ages(
         npcs,
@@ -546,6 +1039,7 @@ async def generate_turn(
         proposed_changes=response.state_proposals,
         authoritative_changes={
             **authoritative_changes,
+            "state_snapshot": state_snapshot,
             "visible": visible_changes,
             "worldline": response.worldline.model_dump(),
         },
@@ -591,6 +1085,12 @@ def _visible_changes(changes: dict[str, Any]) -> dict[str, Any]:
     statuses = changes.get("statuses", {})
     traits = changes.get("traits", {})
     skill_entries = changes.get("skills_entries", {})
+    reputation = changes.get("reputation", {})
+    reputation_delta = (
+        reputation.get("applied_delta")
+        if isinstance(reputation, dict)
+        else None
+    )
     return {
         "inventory_add": inventory.get("added", []),
         "inventory_remove": inventory.get("removed_ids", []),
@@ -629,7 +1129,13 @@ def _visible_changes(changes: dict[str, Any]) -> dict[str, Any]:
         ],
         "resource_cap_deltas": changes.get("resource_caps", {}).get("applied", []),
         "dimension_cap_deltas": changes.get("dimension_caps", {}).get("applied", []),
-        "reputation_deltas": changes.get("reputation", {}),
+        "reputation_deltas": (
+            {"score": int(reputation_delta)}
+            if isinstance(reputation_delta, (int, float))
+            and not isinstance(reputation_delta, bool)
+            and reputation_delta
+            else {}
+        ),
         "relationship_deltas": changes.get("relationships", []),
         "relationship_creations": changes.get("relationship_creations", []),
     }

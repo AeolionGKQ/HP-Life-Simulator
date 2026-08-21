@@ -344,10 +344,16 @@ export const api = {
     payload: {
       client_action_id: string;
       expected_state_version: number;
-      kind: "choice" | "free_text" | "fast_forward" | "fate_intervention";
-      choice_id?: string;
-      free_text?: string;
-      fate_instruction?: string;
+    kind:
+      | "choice"
+      | "free_text"
+      | "fast_forward"
+      | "fate_intervention"
+      | "reshape_fate";
+    choice_id?: string;
+    free_text?: string;
+    fate_instruction?: string;
+    reshape_instruction?: string;
     },
   ) =>
     request<TurnResult>(`/api/sessions/${id}/actions`, {

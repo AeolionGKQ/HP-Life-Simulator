@@ -156,6 +156,48 @@ def test_fate_intervention_request_requires_exclusive_non_empty_instruction() ->
         )
 
 
+def test_reshape_fate_request_requires_exclusive_non_empty_instruction() -> None:
+    request = ActionRequest(
+        client_action_id="reshape-1",
+        expected_state_version=4,
+        kind="reshape_fate",
+        reshape_instruction="  让这一幕的悬念更缓慢地展开。  ",
+    )
+    assert request.reshape_instruction == "让这一幕的悬念更缓慢地展开。"
+
+    with pytest.raises(ValidationError):
+        ActionRequest(
+            client_action_id="reshape-empty",
+            expected_state_version=4,
+            kind="reshape_fate",
+            reshape_instruction="   ",
+        )
+    with pytest.raises(ValidationError):
+        ActionRequest(
+            client_action_id="reshape-mixed",
+            expected_state_version=4,
+            kind="reshape_fate",
+            free_text="普通行动",
+            reshape_instruction="重写这一幕",
+        )
+    with pytest.raises(ValidationError):
+        ActionRequest(
+            client_action_id="reshape-fate-mixed",
+            expected_state_version=4,
+            kind="reshape_fate",
+            fate_instruction="下一幕发生一件事",
+            reshape_instruction="重写这一幕",
+        )
+    with pytest.raises(ValidationError):
+        ActionRequest(
+            client_action_id="ordinary-reshape",
+            expected_state_version=4,
+            kind="choice",
+            choice_id="choice_1",
+            reshape_instruction="不应出现在普通行动中",
+        )
+
+
 @pytest.mark.parametrize("risk", ["low", "medium", "high", "fatal"])
 def test_choice_accepts_only_the_four_risk_levels(risk: str) -> None:
     assert Choice(id="choice", label="行动", risk=risk).risk == risk

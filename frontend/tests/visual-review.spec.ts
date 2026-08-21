@@ -125,6 +125,23 @@ const emptyChanges = {
   reputation_deltas: {}, relationship_deltas: [],
 };
 
+const storyChanges = {
+  ...emptyChanges,
+  inventory_add: [
+    {
+      item_id: "ancient_bookmark",
+      name: "古老书签",
+      description: "刻有未知家族徽记",
+      quantity: 1,
+    },
+    {
+      item_id: "sealed_box",
+      description: "没有留下名称的旧盒子",
+      quantity: 1,
+    },
+  ],
+};
+
 const turnResponse = {
   turn: {
     title: "午夜后的图书馆",
@@ -139,8 +156,8 @@ const turnResponse = {
     { id: "free", label: "写下自己的行动", kind: "free_text", risk: "low", effects_hint: "", effects: { gains: [], losses: [], note: "" } },
   ],
   worldline: { offset_rate: 7.4, delta: 1.2, reason: "你触碰了原本无人发现的档案", affected_nodes: ["禁书区的旧誓言"] },
-  player_changes: emptyChanges,
-  applied_changes: emptyChanges,
+  player_changes: storyChanges,
+  applied_changes: storyChanges,
   memory_update: { summary: "在图书馆发现会写下自己名字的无名旧书。" },
 };
 
@@ -211,7 +228,12 @@ const playerState = {
   },
   statuses: [],
   traits: [{ id: "careful_reader", name: "谨慎的阅读者", polarity: "positive", source: "童年", description: "面对未知文字时更容易察觉异常。" }],
-  inventory: [{ name: "榆木魔杖" }, { name: "黄铜书签" }],
+  inventory: [
+    { name: "榆木魔杖" },
+    { name: "黄铜书签" },
+    { item_id: "ancient_bookmark", name: "古老书签", quantity: 1 },
+    { item_id: "sealed_box", quantity: 1 },
+  ],
   pet: { name: "墨点", species: "猫头鹰" },
   reputation: {
     score: 24,
@@ -534,11 +556,16 @@ for (const viewport of viewports) {
       await expect(page.getByRole("heading", { name: turnResponse.turn.title })).toBeVisible();
       await expect(page.getByText("日期：1991-09-03")).toBeVisible();
       await expect(page.getByText("地点：图书馆")).toBeVisible();
+      await expect(page.getByText("物品：古老书签", { exact: true })).toBeVisible();
+      await expect(page.getByText("物品：sealed_box", { exact: true })).toBeVisible();
       await expect(page.getByText("风险：中")).toBeVisible();
       await expect(page.getByText("风险：低")).toBeVisible();
       if (viewport.name === "mobile") await assertMinimumTouchTargets(page);
       await assertNoHorizontalOverflow(page);
       await page.screenshot({ path: `test-results/visual-review/${viewport.name}-story.png` });
+      await page.getByRole("button", { name: "角色" }).click();
+      await expect(page.getByText("古老书签", { exact: true })).toBeVisible();
+      await expect(page.getByText("sealed_box", { exact: true })).toHaveCount(2);
     });
 
   test("shows reputation score and level in the reputation archive", async ({ page }) => {
@@ -636,6 +663,41 @@ for (const viewport of viewports) {
       expect(requestBody.kind).toBe("fate_intervention");
       expect(requestBody.fate_instruction).toContain("禁书区");
       await expect(page.getByRole("status")).toContainText("命运的墨迹正在改道");
+      if (viewport.name === "mobile") await assertMinimumTouchTargets(page);
+      await assertNoHorizontalOverflow(page);
+    });
+
+    test("reshapes the latest story node without adding history", async ({ page }) => {
+      await installApi(page, "story");
+      await page.goto("/");
+      await page.getByRole("button", { name: `打开存档：${activeSession.name}` }).click();
+
+      const freeTextInput = page.getByPlaceholder("写下一个不在预言之中的行动…");
+      const reshapeTrigger = page.getByRole("button", { name: /重塑命运/ });
+      await expect(reshapeTrigger).toBeVisible();
+      const freeTextBox = await freeTextInput.boundingBox();
+      const reshapeBox = await reshapeTrigger.boundingBox();
+      expect(freeTextBox).not.toBeNull();
+      expect(reshapeBox).not.toBeNull();
+      expect(reshapeBox?.y ?? 0).toBeGreaterThan(freeTextBox?.y ?? 0);
+
+      await reshapeTrigger.click();
+      const instruction = page.getByRole("textbox", { name: "你希望这一幕如何重写" });
+      await expect(instruction).toBeVisible();
+      await instruction.fill("保留无名书出现的事实，但让人物入场更自然，不要重复结算物品。");
+
+      const actionRequest = page.waitForRequest((request) =>
+        request.url().endsWith("/api/sessions/session-active/actions")
+        && request.method() === "POST",
+      );
+      await page.getByRole("button", { name: "重塑这一节点" }).click();
+      const requestBody = JSON.parse((await actionRequest).postData() ?? "{}");
+      expect(requestBody.kind).toBe("reshape_fate");
+      expect(requestBody.reshape_instruction).toContain("不要重复结算物品");
+      const reshapeStatus = page.getByRole("status");
+      await expect(reshapeStatus).toContainText("命运正在重新书写");
+      await expect(reshapeStatus).toBeHidden();
+      await expect(page.getByText("第 2 / 2 个剧情节点", { exact: true })).toBeVisible();
       if (viewport.name === "mobile") await assertMinimumTouchTargets(page);
       await assertNoHorizontalOverflow(page);
     });

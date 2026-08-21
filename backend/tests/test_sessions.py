@@ -1,3 +1,5 @@
+import json
+
 from fastapi.testclient import TestClient
 import pytest
 from sqlalchemy import func, select
@@ -454,6 +456,68 @@ def test_action_applies_rules_and_is_idempotent(monkeypatch) -> None:
                     }
                 }]
             }
+        prompt_context = json.loads(messages[1]["content"].split("\n", 1)[1])
+        if prompt_context["player_action"]["kind"] == "reshape_fate":
+            return {
+                "choices": [{
+                    "message": {
+                        "content": """{
+                          "response_type": "narrative",
+                          "turn": {
+                            "title": "重塑后的迟到来信",
+                            "scene_type": "encounter",
+                            "narrative": "这一次，羽毛笔让窗外的翅膀声停在了更远的雾里。",
+                            "current_date": "1991-06-30",
+                            "location_id": "home"
+                          },
+                          "choices": [
+                            {
+                              "id": "listen",
+                              "label": "屏息听向窗外",
+                              "kind": "action",
+                              "risk": "low"
+                            },
+                            {
+                              "id": "choice_other",
+                              "label": "其他",
+                              "kind": "free_text",
+                              "risk": "low"
+                            }
+                          ],
+                          "player_changes": {
+                            "inventory_add": [
+                              {
+                                "item_id": "rewritten_note",
+                                "name": "重写后的便笺",
+                                "description": "只在重塑版本中成立的物品",
+                                "quantity": 1
+                              }
+                            ],
+                            "resource_deltas": [
+                              {
+                                "id": "mana",
+                                "delta": -4,
+                                "reason_code": "spell_cost",
+                                "reason": "重塑版本中的微弱魔法回响"
+                              }
+                            ]
+                          },
+                          "state_proposals": {},
+                          "worldline": {
+                            "offset_rate": 0,
+                            "delta": 0,
+                            "reason": "重塑后的节点保持原有世界线",
+                            "affected_nodes": []
+                          },
+                          "memory_update": {
+                            "summary": "",
+                            "create_long_term_memory": false,
+                            "resolved_memory_ids": []
+                          }
+                        }"""
+                    }
+                }]
+            }
         return {
             "choices": [
                 {
@@ -464,7 +528,7 @@ def test_action_applies_rules_and_is_idempotent(monkeypatch) -> None:
                             "title": "一封迟到的信",
                             "scene_type": "encounter",
                             "narrative": "窗外传来翅膀拍打玻璃的声音。",
-                            "current_date": "1991-07-01",
+                            "current_date": "1991-06-30",
                             "location_id": "home"
                           },
                           "choices": [
@@ -509,14 +573,17 @@ def test_action_applies_rules_and_is_idempotent(monkeypatch) -> None:
                                 "reason": "在恐惧中保持清醒"
                               }
                             ],
-                            "relationship_deltas": [
+                                "relationship_deltas": [
                               {
                                 "npc_id": "hermione_granger",
                                 "affinity_delta": 4,
                                 "reason": "玩家在危机中保护了赫敏",
                                 "evidence": "本轮叙事记录了两人的明确互动"
-                              }
-                            ]
+                                  }
+                                ],
+                                "reputation_deltas": {
+                                  "score": 4
+                                }
                           },
                           "player_changes": {
                             "inventory_add": [
@@ -575,7 +642,10 @@ def test_action_applies_rules_and_is_idempotent(monkeypatch) -> None:
                                 "reason": "玩家在危机中保护了赫敏",
                                 "evidence": "本轮叙事记录了两人的明确互动"
                               }
-                            ]
+                            ],
+                            "reputation_deltas": {
+                              "score": 4
+                            }
                           },
                           "worldline": {
                             "offset_rate": 3.5,
@@ -625,9 +695,50 @@ def test_action_applies_rules_and_is_idempotent(monkeypatch) -> None:
         )
         assert confirmed.status_code == 200, confirmed.text
         assert confirmed.json()["attribute_initialization"]["status"] == "ready"
+        with get_session_factory()() as db:
+            player_state = db.scalar(
+                select(PlayerState).where(PlayerState.session_id == session_id)
+            )
+            assert player_state is not None
+            state = json.loads(json.dumps(player_state.state, ensure_ascii=False))
+            state["current_context"] = {
+                **state.get("current_context", {}),
+                "current_date": "1991-05-31",
+                "datetime": "1991-05-31T09:00:00+00:00",
+                "location_id": "home",
+            }
+            state["school"] = {
+                **state.get("school", {}),
+                "grade": "year_1",
+                "active_courses": ["charms"],
+                "school_year": "1991-1992",
+                "term": "spring",
+                "course_history": [],
+            }
+            state["skills"] = {
+                "charms": {
+                    "id": "charms",
+                    "name": "咒语",
+                    "description": "学习施放、控制和组合各种实用咒语。",
+                    "level": 2,
+                    "experience": 0,
+                    "source": "course",
+                    "course_id": "charms",
+                    "course_skill": True,
+                }
+            }
+            player_state.state = state
+            db.commit()
         current_detail = client.get(f"/api/sessions/{session_id}").json()
         assert current_detail["status"] == "active", current_detail
         assert current_detail["player_state"]["attribute_initialization"]["status"] == "ready", current_detail
+        baseline_state = client.get(f"/api/sessions/{session_id}/state").json()["state"]
+        baseline_relationships = {
+            item["target_id"]: item["state"]
+            for item in client.get(
+                f"/api/sessions/{session_id}/relationships"
+            ).json()
+        }
         action = {
             "client_action_id": f"fixed-action-id-{session_id}",
             "expected_state_version": 1,
@@ -650,9 +761,74 @@ def test_action_applies_rules_and_is_idempotent(monkeypatch) -> None:
         assert repeated.status_code == 200
         assert repeated.json()["turn_id"] == result.json()["turn_id"]
 
+        reshape = {
+            "client_action_id": f"reshape-action-id-{session_id}",
+            "expected_state_version": 2,
+            "kind": "reshape_fate",
+            "reshape_instruction": "让这封信的到来更有悬念，不要重复原节点的状态变化。",
+        }
+        reshaped = client.post(
+            f"/api/sessions/{session_id}/actions",
+            json=reshape,
+        )
+        assert reshaped.status_code == 200, reshaped.text
+        assert reshaped.json()["state_version"] == 3
+        assert reshaped.json()["response"]["turn"]["title"] == "重塑后的迟到来信"
+        assert reshaped.json()["response"]["applied_changes"]["inventory_add"][0]["item_id"] == "rewritten_note"
+        assert reshaped.json()["response"]["applied_changes"]["resource_deltas"][0]["delta"] == -4
+        assert reshaped.json()["response"]["applied_changes"]["skill_add"] == []
+        assert reshaped.json()["response"]["applied_changes"]["course_skill_deltas"]["charms"] == 1
+        assert reshaped.json()["response"]["applied_changes"]["relationship_deltas"] == []
+        reshaped_state = client.get(f"/api/sessions/{session_id}/state").json()["state"]
+        for key in ("dimensions", "statuses", "traits", "reputation"):
+            assert reshaped_state[key] == baseline_state[key], key
+        assert reshaped_state["resources"]["mana"]["value"] == baseline_state["resources"]["mana"]["value"] - 4
+        assert [item["item_id"] for item in reshaped_state["inventory"]] == ["rewritten_note"]
+        assert reshaped_state["skills"]["charms"]["level"] == baseline_state["skills"]["charms"]["level"] + 1
+        assert "spellcasting" not in reshaped_state["skills"]
+        assert reshaped_state["school"]["last_course_progression_year"] == 1991
+        assert len(reshaped_state["school"]["course_history"]) == 1
+        assert reshaped_state["worldline"]["offset_rate"] == baseline_state["worldline"]["offset_rate"]
+        reshaped_relationships = {
+            item["target_id"]: item["state"]
+            for item in client.get(
+                f"/api/sessions/{session_id}/relationships"
+            ).json()
+        }
+        for target_id, baseline_relationship in baseline_relationships.items():
+            for key in ("affinity", "trust", "stage", "romance_stage"):
+                assert reshaped_relationships[target_id][key] == baseline_relationship[key], (
+                    target_id,
+                    key,
+                )
+        turns = client.get(f"/api/sessions/{session_id}/turns").json()
+        assert len(turns) == 1
+        assert turns[0]["id"] == result.json()["turn_id"]
+        assert turns[0]["sequence"] == 1
+        assert turns[0]["response"]["turn"]["title"] == "重塑后的迟到来信"
+        journal = client.get(f"/api/sessions/{session_id}/journal").json()
+        assert len(journal) == 1
+        assert journal[0]["title"] == "重塑后的迟到来信"
+        reshape_prompt_context = captured_messages[-1]["content"]
+        assert '"kind": "reshape_fate"' in reshape_prompt_context
+        assert "不要重复原节点的状态变化" in reshape_prompt_context
+
+        reshaped_retry = client.post(
+            f"/api/sessions/{session_id}/actions",
+            json=reshape,
+        )
+        assert reshaped_retry.status_code == 200
+        assert reshaped_retry.json()["turn_id"] == reshaped.json()["turn_id"]
+        assert reshaped_retry.json()["state_version"] == 3
+        retry_state = client.get(f"/api/sessions/{session_id}/state").json()["state"]
+        assert retry_state["resources"]["mana"]["value"] == baseline_state["resources"]["mana"]["value"] - 4
+        assert [item["item_id"] for item in retry_state["inventory"]] == ["rewritten_note"]
+        assert retry_state["skills"]["charms"]["level"] == baseline_state["skills"]["charms"]["level"] + 1
+        assert len(retry_state["school"]["course_history"]) == 1
+
         fate_action = {
             "client_action_id": f"fate-action-id-{session_id}",
-            "expected_state_version": 2,
+            "expected_state_version": 3,
             "kind": "fate_intervention",
             "fate_instruction": "下一幕让无名书出现在禁书区，并让赫敏发现它。",
         }
@@ -661,7 +837,7 @@ def test_action_applies_rules_and_is_idempotent(monkeypatch) -> None:
             json=fate_action,
         )
         assert fate_result.status_code == 200, fate_result.text
-        assert fate_result.json()["state_version"] == 3
+        assert fate_result.json()["state_version"] == 4
         fate_prompt_context = captured_messages[-1]["content"]
         assert '"kind": "fate_intervention"' in fate_prompt_context
         assert "无名书出现在禁书区" in fate_prompt_context
@@ -670,11 +846,16 @@ def test_action_applies_rules_and_is_idempotent(monkeypatch) -> None:
         assert recorded_turns.json()[-1]["action"]["kind"] == "fate_intervention"
 
         state = client.get(f"/api/sessions/{session_id}/state").json()["state"]
-        assert state["dimensions"]["willpower"]["value"] == 12
-        assert state["resources"]["mana"]["value"] == 84
-        assert state["current_context"]["current_date"] == "1991-07-01"
-        assert state["current_context"]["datetime"].startswith("1991-07-01T09:00:00")
-        assert state["inventory"][0]["item_id"] == "hogwarts_letter"
+        assert state["dimensions"]["willpower"]["value"] == 11
+        assert state["resources"]["mana"]["value"] == 88
+        assert state["current_context"]["current_date"] == "1991-06-30"
+        assert state["current_context"]["datetime"].startswith("1991-06-30T09:00:00")
+        assert {item["item_id"] for item in state["inventory"]} == {
+            "rewritten_note",
+            "hogwarts_letter",
+        }
         assert state["statuses"][0]["id"] == "excited"
         assert state["skills"]["spellcasting"]["name"] == "魔咒"
+        assert state["skills"]["charms"]["level"] == 3
+        assert len(state["school"]["course_history"]) == 1
         assert state["traits"][0]["description"] == "你在魔咒练习中表现出稳定的专注力。"
