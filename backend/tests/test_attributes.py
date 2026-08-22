@@ -92,6 +92,33 @@ def test_resource_and_dimension_rules_clamp_and_audit() -> None:
     assert changes["dimensions"]["applied"][0]["proposed_delta"] == 5
 
 
+def test_fractional_resource_and_dimension_changes_are_rounded() -> None:
+    state = _state()
+    state["resources"]["energy"] = {"value": 71.0, "max": 100.0}
+    state["dimensions"]["constitution"] = {"value": 10.0, "max": 20.0}
+    response = _response({
+        "resource_deltas": [{
+            "id": "energy",
+            "delta": -0.123456,
+            "reason_code": "rest",
+            "reason": "短暂休息",
+        }],
+        "dimension_deltas": [{
+            "id": "constitution",
+            "delta": 0.123456,
+            "reason_code": "training",
+            "reason": "基础训练",
+        }],
+    })
+
+    state, changes = apply_turn_rules(state, [], response)
+
+    assert state["resources"]["energy"]["value"] == 70.8765
+    assert changes["resources"]["applied"][0]["delta"] == -0.1235
+    assert state["dimensions"]["constitution"]["value"] == 10.1235
+    assert changes["dimensions"]["applied"][0]["delta"] == 0.1235
+
+
 def test_health_zero_causes_death_and_sanity_zero_causes_collapse() -> None:
     death, _ = apply_turn_rules(
         _state(),

@@ -1385,7 +1385,7 @@ function ChangeNotice({
           ...changes.trait_remove.map((item) => `词条：${item}`),
         ]} />
         <ChangeList title="变化" items={[
-          ...Object.entries(changes.skill_deltas).map(([key, value]) => `技能 ${key}：${value > 0 ? "+" : ""}${value}`),
+          ...Object.entries(changes.skill_deltas).map(([key, value]) => `技能 ${key}：${formatDelta(value)}`),
           ...Object.entries(changes.skill_experience_deltas ?? {}).map(
             ([key, value]) => `技能 ${key} 经验：+${value}`,
           ),
@@ -1439,7 +1439,7 @@ function ResourceSection({ resources }: { resources: Record<string, any> }) {
           <Stat
             key={id}
             label={resourceLabel(id)}
-            value={`${resources[id]?.value ?? 0}/${resources[id]?.max ?? 100}`}
+            value={`${formatNumber(resources[id]?.value ?? 0)}/${formatNumber(resources[id]?.max ?? 100)}`}
           />
         ))}
       </div>
@@ -1456,7 +1456,7 @@ function DimensionSection({ dimensions }: { dimensions: Record<string, any> }) {
           <Stat
             key={id}
             label={dimensionLabel(id)}
-            value={`${dimensions[id]?.value ?? 0}/${dimensions[id]?.max ?? 20}`}
+            value={`${formatNumber(dimensions[id]?.value ?? 0)}/${formatNumber(dimensions[id]?.max ?? 20)}`}
           />
         ))}
       </div>
@@ -1485,5 +1485,11 @@ function dimensionLabel(id: string): string {
 }
 
 function formatDelta(value: number): string {
-  return `${value > 0 ? "+" : ""}${value}`;
+  const normalized = Number.isFinite(value) ? Number(value.toFixed(4)) : 0;
+  return `${normalized > 0 ? "+" : ""}${normalized}`;
+}
+
+function formatNumber(value: unknown): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "0";
+  return String(Number(value.toFixed(4)));
 }

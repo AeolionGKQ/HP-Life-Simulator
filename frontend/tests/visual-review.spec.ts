@@ -167,6 +167,12 @@ const emptyChanges = {
 
 const storyChanges = {
   ...emptyChanges,
+  resource_deltas: [
+    { id: "energy", delta: -0.09999999999999964, reason_code: "rest", reason: "短暂休息" },
+  ],
+  dimension_deltas: [
+    { id: "constitution", delta: 0.09999999999999964, reason_code: "training", reason: "基础训练" },
+  ],
   inventory_add: [
     {
       item_id: "ancient_bookmark",
@@ -666,6 +672,16 @@ for (const viewport of viewports) {
       await page.getByRole("button", { name: "角色" }).click();
       await expect(page.getByText("古老书签", { exact: true })).toBeVisible();
       await expect(page.getByText("sealed_box", { exact: true })).toHaveCount(2);
+    });
+
+    test("formats fractional state changes without floating point noise", async ({ page }) => {
+      await installApi(page, "story");
+      await page.goto("/");
+      await page.getByRole("button", { name: `打开存档：${activeSession.name}` }).click();
+
+      await expect(page.getByText("精力：-0.1", { exact: false })).toBeVisible();
+      await expect(page.getByText("体质：+0.1", { exact: false })).toBeVisible();
+      await expect(page.getByText("0.09999999999999964", { exact: false })).toHaveCount(0);
     });
 
   test("shows reputation score and level in the reputation archive", async ({ page }) => {

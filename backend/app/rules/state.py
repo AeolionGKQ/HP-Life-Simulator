@@ -61,6 +61,8 @@ from backend.app.content.bonds import (
 )
 from backend.app.schemas.game import NarrativeResponse
 
+NUMERIC_PRECISION = 4
+
 
 def apply_turn_rules(
     state: dict[str, Any],
@@ -731,7 +733,12 @@ def _bounded_delta(raw_delta: Any) -> float | None:
         return None
     if raw_delta != raw_delta or raw_delta in {float("inf"), float("-inf")}:
         return None
-    return float(raw_delta)
+    return _round_numeric(raw_delta)
+
+
+def _round_numeric(value: Any) -> float:
+    rounded = round(float(value), NUMERIC_PRECISION)
+    return 0.0 if rounded == 0 else rounded
 
 
 def _apply_resource_caps(
@@ -757,9 +764,9 @@ def _apply_resource_caps(
             continue
         resource_id = str(item["id"])
         resource = resources.setdefault(resource_id, {})
-        before = float(resource.get("max", RESOURCE_CATALOG[resource_id]["default_max"]))
+        before = _round_numeric(resource.get("max", RESOURCE_CATALOG[resource_id]["default_max"]))
         maximum = float(RESOURCE_CATALOG[resource_id]["absolute_max"])
-        after = max(1.0, min(maximum, before + delta))
+        after = _round_numeric(max(1.0, min(maximum, before + delta)))
         resource["max"] = after
         if float(resource.get("value", 0)) > after:
             resource["value"] = after
@@ -767,7 +774,7 @@ def _apply_resource_caps(
             "id": resource_id,
             "before": before,
             "after": after,
-            "delta": after - before,
+            "delta": _round_numeric(after - before),
             "reason_code": str(item.get("reason_code", "")),
             "reason": str(item.get("reason", "")),
         })
@@ -798,9 +805,9 @@ def _apply_dimension_caps(
             continue
         dimension_id = str(item["id"])
         dimension = dimensions.setdefault(dimension_id, {})
-        before = float(dimension.get("max", DIMENSION_CATALOG[dimension_id]["default_max"]))
+        before = _round_numeric(dimension.get("max", DIMENSION_CATALOG[dimension_id]["default_max"]))
         maximum = float(DIMENSION_CATALOG[dimension_id]["absolute_max"])
-        after = max(1.0, min(maximum, before + delta))
+        after = _round_numeric(max(1.0, min(maximum, before + delta)))
         dimension["max"] = after
         if float(dimension.get("value", 0)) > after:
             dimension["value"] = after
@@ -808,7 +815,7 @@ def _apply_dimension_caps(
             "id": dimension_id,
             "before": before,
             "after": after,
-            "delta": after - before,
+            "delta": _round_numeric(after - before),
             "reason_code": str(item.get("reason_code", "")),
             "reason": str(item.get("reason", "")),
         })
@@ -843,15 +850,15 @@ def _apply_resource_deltas(
                 "base_max": RESOURCE_CATALOG[resource_id]["default_max"],
             },
         )
-        before = float(resource.get("value", 0))
+        before = _round_numeric(resource.get("value", 0))
         maximum = float(resource.get("max", RESOURCE_CATALOG[resource_id]["default_max"]))
-        after = max(0.0, min(maximum, before + delta))
+        after = _round_numeric(max(0.0, min(maximum, before + delta)))
         resource["value"] = after
         applied.append({
             "id": resource_id,
             "before": before,
             "after": after,
-            "delta": after - before,
+            "delta": _round_numeric(after - before),
             "reason_code": str(item.get("reason_code", "")),
             "reason": str(item.get("reason", "")),
         })
@@ -890,7 +897,7 @@ def _apply_dimension_deltas(
                 "base_max": DIMENSION_CATALOG[dimension_id]["default_max"],
             },
         )
-        before = float(dimension.get("value", 0))
+        before = _round_numeric(dimension.get("value", 0))
         maximum = float(dimension.get("max", DIMENSION_CATALOG[dimension_id]["default_max"]))
         limit = 2.0 if str(item.get("reason_code", "")) in {
             "major_discovery",
@@ -900,14 +907,14 @@ def _apply_dimension_deltas(
             "ritual",
         } else 1.0
         bounded = max(-limit, min(limit, delta))
-        after = max(0.0, min(maximum, before + bounded))
+        after = _round_numeric(max(0.0, min(maximum, before + bounded)))
         dimension["value"] = after
         changed_count += 1
         applied.append({
             "id": dimension_id,
             "before": before,
             "after": after,
-            "delta": after - before,
+            "delta": _round_numeric(after - before),
             "proposed_delta": delta,
             "reason_code": str(item.get("reason_code", "")),
             "reason": str(item.get("reason", "")),
