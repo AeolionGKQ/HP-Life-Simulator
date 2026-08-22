@@ -119,6 +119,25 @@ def test_fractional_resource_and_dimension_changes_are_rounded() -> None:
     assert changes["dimensions"]["applied"][0]["delta"] == 0.1235
 
 
+def test_inventory_removal_keeps_the_existing_item_name_for_audit() -> None:
+    state = _state()
+    state["inventory"] = [{
+        "item_id": "sealed_box",
+        "name": "无名旧盒",
+        "description": "没有留下名称的旧盒子",
+        "quantity": 1,
+    }]
+    response = _response({
+        "inventory_remove": ["sealed_box"],
+    })
+
+    state, changes = apply_turn_rules(state, [], response)
+
+    assert state["inventory"] == []
+    assert changes["inventory"]["removed"][0]["item_id"] == "sealed_box"
+    assert changes["inventory"]["removed"][0]["name"] == "无名旧盒"
+
+
 def test_health_zero_causes_death_and_sanity_zero_causes_collapse() -> None:
     death, _ = apply_turn_rules(
         _state(),

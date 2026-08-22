@@ -264,6 +264,7 @@ class PlayerChanges(BaseModel):
 
 
 class AppliedPlayerChanges(PlayerChanges):
+    inventory_remove: list[dict[str, Any] | str] = []
     relationship_deltas: list[dict[str, Any]] = []
     relationship_creations: list[dict[str, Any]] = []
 

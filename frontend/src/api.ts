@@ -168,7 +168,7 @@ export interface NPCState {
 
 export interface PlayerChanges {
   inventory_add: Array<Record<string, any>>;
-  inventory_remove: string[];
+  inventory_remove: Array<Record<string, any> | string>;
   status_add: Array<Record<string, any>>;
   status_remove: string[];
   skill_add: Array<Record<string, any>>;

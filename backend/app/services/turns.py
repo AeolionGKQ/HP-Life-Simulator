@@ -1101,7 +1101,7 @@ def _visible_changes(changes: dict[str, Any]) -> dict[str, Any]:
     )
     return {
         "inventory_add": inventory.get("added", []),
-        "inventory_remove": inventory.get("removed_ids", []),
+        "inventory_remove": inventory.get("removed", inventory.get("removed_ids", [])),
         "status_add": statuses.get("added", []),
         "status_remove": statuses.get("removed", []),
         "skill_add": [

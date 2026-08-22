@@ -167,6 +167,9 @@ const emptyChanges = {
 
 const storyChanges = {
   ...emptyChanges,
+  inventory_remove: [
+    { item_id: "sealed_box", name: "无名旧盒", description: "没有留下名称的旧盒子", quantity: 1 },
+  ],
   resource_deltas: [
     { id: "energy", delta: -0.09999999999999964, reason_code: "rest", reason: "短暂休息" },
   ],
@@ -331,12 +334,12 @@ const expelledPlayerState = {
   },
 };
 
-type Scenario = "landing" | "setup" | "setup-birthday" | "setup-confirm" | "setup-starting-point" | "setup-friends" | "story" | "story-switching" | "expulsion";
+type Scenario = "landing" | "setup" | "setup-birthday" | "setup-confirm" | "setup-starting-point" | "setup-friends" | "story" | "story-switching" | "story-writing" | "expulsion";
 
 async function installApi(page: Page, scenario: Scenario) {
   const sessions = scenario === "setup" || scenario === "setup-birthday" || scenario === "setup-confirm" || scenario === "setup-starting-point" || scenario === "setup-friends"
     ? [setupSession]
-    : scenario === "story" || scenario === "story-switching" || scenario === "expulsion"
+    : scenario === "story" || scenario === "story-switching" || scenario === "story-writing" || scenario === "expulsion"
       ? [activeSession]
       : [];
   let actionCompleted = false;
@@ -446,7 +449,7 @@ async function installApi(page: Page, scenario: Scenario) {
     }
     const body = bodies[path];
     if (path === "/api/sessions/session-active/actions") {
-      await new Promise((resolve) => setTimeout(resolve, scenario === "story-switching" ? 2000 : 800));
+      await new Promise((resolve) => setTimeout(resolve, scenario === "story-switching" || scenario === "story-writing" ? 2000 : 800));
       const requestBody = request.postDataJSON() as { kind?: string };
       actionCompleted = true;
       actionAddsTurn = requestBody.kind !== "reshape_fate";
@@ -720,6 +723,15 @@ for (const viewport of viewports) {
       await expect(page.getByText("0.09999999999999964", { exact: false })).toHaveCount(0);
     });
 
+    test("shows the Chinese name when an item is removed", async ({ page }) => {
+      await installApi(page, "story");
+      await page.goto("/");
+      await page.getByRole("button", { name: `打开存档：${activeSession.name}` }).click();
+
+      await expect(page.getByText("物品：无名旧盒", { exact: true })).toBeVisible();
+      await expect(page.getByText("物品：sealed_box", { exact: true })).toBeVisible();
+    });
+
   test("shows reputation score and level in the reputation archive", async ({ page }) => {
       await installApi(page, "story");
       await page.goto("/");
@@ -873,7 +885,7 @@ for (const viewport of viewports) {
     });
 
     test("keeps archive panels available while the quill writes", async ({ page }) => {
-      await installApi(page, "story");
+      await installApi(page, "story-writing");
       await page.goto("/");
       await page.getByRole("button", { name: `打开存档：${activeSession.name}` }).click();
       await page.getByRole("button", { name: "举起魔杖，走近那本自行书写的旧书" }).click();

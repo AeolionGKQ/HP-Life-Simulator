@@ -1318,14 +1318,29 @@ def _apply_inventory(
         if (isinstance(item, (dict, str)) and item)
     } if isinstance(removed, list) else set()
     if removed_ids:
+        removed_items = []
+        for item in inventory:
+            if not isinstance(item, dict) or str(item.get("item_id")) not in removed_ids:
+                continue
+            removed_items.append({
+                **item,
+                "name": item.get("name") or item.get("item_name") or item.get("item_id"),
+            })
         state["inventory"] = [
             item
             for item in inventory
             if str(item.get("item_id")) not in removed_ids
         ]
+    else:
+        removed_items = []
     if added_items or removed_ids:
         changes["inventory"] = {
             "added": added_items,
+            "removed": removed_items + [
+                item_id
+                for item_id in sorted(removed_ids)
+                if not any(item.get("item_id") == item_id for item in removed_items)
+            ],
             "removed_ids": sorted(removed_ids),
         }
 

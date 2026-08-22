@@ -1406,7 +1406,7 @@ function ChangeNotice({
           ),
         ]} />
         <ChangeList title="失去" items={[
-          ...changes.inventory_remove.map((item) => `物品：${item}`),
+          ...changes.inventory_remove.map((item) => `物品：${displayItemName(item)}`),
           ...changes.status_remove.map((item) => `状态：${item}`),
           ...changes.skill_remove.map((item) => `技能：${item}`),
           ...changes.trait_remove.map((item) => `词条：${item}`),
