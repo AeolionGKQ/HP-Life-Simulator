@@ -50,6 +50,14 @@ test("exposes the archive as a named navigation landmark", async ({ page }) => {
   await expect(page.getByRole("navigation", { name: "魔法档案导航" })).toBeVisible();
 });
 
+test("opens the new-save flow from the archive manager", async ({ page }) => {
+  await page.getByRole("button", { name: "创建新存档" }).click();
+
+  await expect(page.getByRole("heading", { name: "从档案柜中取出一卷羊皮纸" })).toBeVisible();
+  await expect(page.getByPlaceholder("为这段命运题名（可选）")).toBeVisible();
+  await expect(page.getByRole("button", { name: "开始新的游戏" })).toBeVisible();
+});
+
 test("opens model settings as a named dialog with an accessible close control", async ({ page }) => {
   await page.getByRole("button", { name: "修改 / 测试" }).click();
 

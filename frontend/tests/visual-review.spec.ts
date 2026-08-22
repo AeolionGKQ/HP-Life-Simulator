@@ -512,6 +512,21 @@ for (const viewport of viewports) {
       await page.screenshot({ path: `test-results/visual-review/${viewport.name}-setup.png` });
     });
 
+    test("opens the new-save flow from the save manager", async ({ page }) => {
+      await installApi(page, "setup");
+      await page.goto("/");
+      await page.getByRole("button", { name: `打开存档：${setupSession.name}` }).click();
+      await expect(page.getByRole("heading", { name: setupView.current.title })).toBeVisible();
+
+      await page.getByRole("button", { name: "创建新存档" }).click();
+
+      await expect(page.getByRole("heading", { name: "从档案柜中取出一卷羊皮纸" })).toBeVisible();
+      await expect(page.getByPlaceholder("为这段命运题名（可选）")).toBeVisible();
+      await expect(page.getByRole("button", { name: "开始新的游戏" })).toBeVisible();
+      if (viewport.name === "mobile") await assertMinimumTouchTargets(page);
+      await assertNoHorizontalOverflow(page);
+    });
+
     test("restricts the story starting point to predefined options", async ({ page }) => {
       await installApi(page, "setup-starting-point");
       await page.goto("/");

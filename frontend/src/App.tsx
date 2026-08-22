@@ -10,6 +10,7 @@ import {
   MagicWand,
   Medal,
   PencilSimple,
+  Plus,
   Scroll,
   Sparkle,
   Star,
@@ -314,6 +315,24 @@ export function App() {
   function beginRename(session: GameSession) {
     setRenamingSessionId(session.id);
     setRenameDraft(session.name);
+  }
+
+  function beginNewSession() {
+    setSelectedSessionId(null);
+    setSetup(null);
+    setSetupAnswer("");
+    setName("");
+    setError("");
+    setWorldlineRate(0);
+    setRenamingSessionId(null);
+    setRenameDraft("");
+    setActiveMenu("角色");
+    window.requestAnimationFrame(() => {
+      document.querySelector(".empty-panel")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
   }
 
   async function saveRename(sessionId: string) {
@@ -662,6 +681,15 @@ export function App() {
             <p className="eyebrow">封存的世界线</p>
             <h2>命运卷宗</h2>
           </div>
+          <button
+            aria-label="创建新存档"
+            className="secondary-button save-create-button"
+            disabled={creating || saveManaging}
+            onClick={beginNewSession}
+          >
+            <Plus aria-hidden="true" />
+            创建新存档
+          </button>
         </div>
         <div className="save-grid">
           {sessions.length === 0 ? (
