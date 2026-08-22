@@ -355,6 +355,7 @@ class NarrativeTurn(BaseModel):
     narrative: str
     current_date: date
     location_id: str
+    location_name: str = ""
     grade: GRADE_ID | None = None
     school_transition: SchoolTransition | None = None
     time_advance_minutes: int = Field(default=0, ge=0)

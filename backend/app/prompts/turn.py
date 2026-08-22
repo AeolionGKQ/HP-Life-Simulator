@@ -42,6 +42,7 @@ NARRATIVE_JSON_TEMPLATE_BEGIN
     "narrative": "本回合完整剧情正文",
     "current_date": "1991-09-01",
     "location_id": "current_location",
+    "location_name": "当前地点中文名称",
     "grade": "not_enrolled",
     "school_transition": null
   },
@@ -394,6 +395,9 @@ player_state.character_notes 是玩家对角色的自由补充设定。每轮叙
 不要为了迎合玩家而强行成功，也不要让失败直接抹除玩家选择。生成后续剧情和 NPC 态度时，必须继续综合这些因素。
 每轮必须在 turn.current_date 返回当前剧情日期，格式严格为 YYYY-MM-DD；日期不能早于上下文中的上一轮日期。
 每轮必须在 turn.location_id 返回当前剧情地点 ID；如果地点改变，返回新地点，否则重复上一轮地点。
+每轮必须同时在 turn.location_name 返回与 location_id 对应的中文地点名称，用于玩家显示；
+location_id 是稳定的英文原始地点 ID，用于程序规则和状态保存，例如 location_id="ollivanders" 时，
+例如 location_name="奥利凡德魔杖店" 时，必须返回对应中文地点名称；旧地点没有合适中文名时，location_name 可以为空字符串。
 不要返回具体时分，也不要使用 time_advance_minutes；日期推进由 current_date 的绝对日期负责。
 上下文中的 generation.generation_mainline 是当前世代的长期剧情锚点。每轮推进都要与该主线保持时代和因果关联；
 可以因玩家选择改变具体结局，但不得无故跳离该世代、遗忘核心冲突或引入其他世代的主线人物与事件。

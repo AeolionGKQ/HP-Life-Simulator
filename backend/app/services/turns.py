@@ -380,6 +380,9 @@ def _normalize_narrative_payload(
                 ),
                 "current_date": normalized.get("current_date") or normalized.get("date"),
                 "location_id": normalized.get("location_id") or "unknown",
+                "location_name": normalized.get("location_name")
+                or normalized.get("location")
+                or "",
                 "time_advance_minutes": int(
                     normalized.get("time_advance_minutes")
                     or normalized.get("time_advance")
@@ -405,6 +408,10 @@ def _normalize_narrative_payload(
             or normalized.get("date")
         )
     turn.setdefault("location_id", normalized.get("location_id") or "unknown")
+    turn.setdefault(
+        "location_name",
+        normalized.get("location_name") or normalized.get("location") or turn.get("location") or "",
+    )
     if "time_advance_minutes" not in turn:
         turn["time_advance_minutes"] = int(
             turn.get("time_advance") or normalized.get("time_advance") or 0
@@ -710,6 +717,7 @@ async def _reshape_latest_turn(
     response = parsed_response
     response.turn.current_date = original_response.turn.current_date
     response.turn.location_id = original_response.turn.location_id
+    response.turn.location_name = original_response.turn.location_name
     response.worldline.offset_rate = max(
         settings.game.worldline_min,
         min(settings.game.worldline_max, response.worldline.offset_rate),
