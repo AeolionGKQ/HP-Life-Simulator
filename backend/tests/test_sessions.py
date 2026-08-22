@@ -92,6 +92,34 @@ def test_origin_setup_options_have_three_preset_descriptions() -> None:
     assert "父母都是麻瓜" in step.options[2].description
 
 
+def test_setup_accepts_empty_initial_friend_answer() -> None:
+    with TestClient(create_app()) as client:
+        session_id = client.post(
+            "/api/sessions",
+            json={"name": "无预设好友测试"},
+        ).json()["id"]
+        with get_session_factory()() as db:
+            player_state = db.scalar(
+                select(PlayerState).where(PlayerState.session_id == session_id)
+            )
+            assert player_state is not None
+            state = dict(player_state.state)
+            setup = dict(state["setup"])
+            setup["current_step"] = 13
+            state["setup"] = setup
+            player_state.state = state
+            db.commit()
+
+        response = client.post(
+            f"/api/sessions/{session_id}/setup/answer",
+            json={"step": 13, "answer": ""},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["current"]["step"] == 14
+        assert response.json()["answers"]["13"] == ""
+
+
 def test_starting_point_accepts_only_predefined_story_nodes() -> None:
     with TestClient(create_app()) as client:
         for starting_point in (

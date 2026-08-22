@@ -113,6 +113,8 @@ def apply_turn_rules(
                 "after": current_date.isoformat(),
             }
     context["location_id"] = response.turn.location_id
+    if response.turn.location_name:
+        context["location_name"] = response.turn.location_name
     if response.turn.location_id != state.get("current_context", {}).get("location_id"):
         changes["location_id"] = response.turn.location_id
     _update_age(next_state, _parse_datetime(context.get("datetime")), changes)

@@ -71,6 +71,9 @@ def test_turn_system_prompt_contains_parseable_response_templates() -> None:
     assert "经验达到 100 后，由程序自动将技能等级提升 1 并把经验清零" in system_prompt
     assert "current_date" in system_prompt
     assert "location_id" in system_prompt
+    assert "location_name" in system_prompt
+    assert 'location_id="ollivanders"' in system_prompt
+    assert 'location_name="奥利凡德魔杖店"' in system_prompt
     assert "不是必然成功" in system_prompt
     assert "奥利凡德魔杖店" in system_prompt
     assert "分院" in system_prompt

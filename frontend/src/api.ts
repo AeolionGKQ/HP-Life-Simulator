@@ -209,6 +209,7 @@ export interface TurnResult {
       narrative: string;
       current_date: string;
       location_id: string;
+      location_name?: string;
       time_advance_minutes?: number;
     };
     choices: Array<{

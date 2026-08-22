@@ -79,6 +79,30 @@ const startingPointSetupView = {
   },
 };
 
+const initialFriendsSetupView = {
+  ...setupView,
+  current_step: 13,
+  current: {
+    step: 13,
+    title: "初始好友",
+    description: "可选择预设好友，也可以不选择任何预设好友，独自开始故事。",
+    selection_mode: "append" as const,
+    options: [
+      { id: "harry_potter", label: "哈利·波特", description: "勇敢而珍惜友谊。", value: "哈利·波特", category: "", appendable: true, available: true },
+      { id: "hermione_granger", label: "赫敏·格兰杰", description: "认真聪明。", value: "赫敏·格兰杰", category: "", appendable: true, available: true },
+    ],
+  },
+  answers: {
+    ...setupView.answers,
+    "7": "童年经历",
+    "8": "性格",
+    "9": "价值观",
+    "10": "魔杖",
+    "11": "魔法天赋",
+    "12": "猫头鹰",
+  },
+};
+
 const completedSetup = {
   current_step: 18,
   completed: true,
@@ -153,6 +177,7 @@ const turnResponse = {
     narrative: "禁书区的最后一盏灯忽然熄灭。你听见书架深处传来羽毛笔划过羊皮纸的声音，而那张桌子前分明没有任何人。\n\n一册没有书名的旧书自行翻开，墨迹在纸上缓慢聚成你的名字。",
     current_date: "1991-09-03",
     location_id: "library",
+    location_name: "图书馆",
   },
   choices: [
     { id: "approach", label: "举起魔杖，走近那本自行书写的旧书", kind: "choice", risk: "medium", effects_hint: "可能发现秘密", effects: { gains: [{ id: "clue", name: "古老线索", type: "memory", direction: "gain", description: "与城堡旧誓言有关" }], losses: [], note: "需要保持警觉" } },
@@ -172,7 +197,8 @@ const previousTurnResponse = {
     title: "猫头鹰带来的第一封信",
     narrative: "窗台上的猫头鹰刚刚离开，厚重的信封安静地躺在你的书桌上。",
     current_date: "1991-09-02",
-    location_id: "home",
+    location_id: "ollivanders",
+    location_name: "",
   },
   choices: [
     { id: "open_letter", label: "拆开信封，看看里面写了什么", kind: "choice", risk: "low", effects_hint: "", effects: { gains: [], losses: [], note: "" } },
@@ -201,8 +227,8 @@ const playerState = {
     charisma: { value: 9, max: 20 },
     magical_power: { value: 13, max: 20 },
   },
-  current_context: { datetime: "1991-09-03 00:18", current_date: "1991-09-03", location_id: "library" },
-  worldline: { offset_rate: 7.4, reason: "一段被遗忘的誓言重新出现", affected_nodes: ["禁书区的旧誓言"] },
+  current_context: { datetime: "1991-09-03 00:18", current_date: "1991-09-03", location_id: "library", location_name: "图书馆" },
+  worldline: { offset_rate: 7.4, reason: "一段被遗忘的誓言重新出现", affected_nodes: ["first_letter_and_enrollment", "禁书区的旧誓言"] },
   school: { year_level: 1, house: "ravenclaw", courses: ["魔咒学", "变形术"] },
   family: { bloodline: "half_blood", home: "约克郡的一座旧宅" },
   personality: { temperament: "安静而好奇" },
@@ -278,10 +304,10 @@ const expelledPlayerState = {
   },
 };
 
-type Scenario = "landing" | "setup" | "setup-confirm" | "setup-starting-point" | "story" | "expulsion";
+type Scenario = "landing" | "setup" | "setup-confirm" | "setup-starting-point" | "setup-friends" | "story" | "expulsion";
 
 async function installApi(page: Page, scenario: Scenario) {
-  const sessions = scenario === "setup" || scenario === "setup-confirm" || scenario === "setup-starting-point"
+  const sessions = scenario === "setup" || scenario === "setup-confirm" || scenario === "setup-starting-point" || scenario === "setup-friends"
     ? [setupSession]
     : scenario === "story" || scenario === "expulsion"
       ? [activeSession]
@@ -298,6 +324,8 @@ async function installApi(page: Page, scenario: Scenario) {
         ? finalSetupView
         : scenario === "setup-starting-point"
           ? startingPointSetupView
+          : scenario === "setup-friends"
+            ? initialFriendsSetupView
           : setupView,
       "/api/sessions/session-active/setup": completedSetup,
       "/api/sessions/session-active/state": {
@@ -363,6 +391,13 @@ async function installApi(page: Page, scenario: Scenario) {
         },
       });
       return;
+    }
+    if (path === "/api/sessions/session-setup/setup/answer" && request.method() === "POST") {
+      const requestBody = request.postDataJSON() as { step?: number; answer?: string };
+      if (requestBody.step === 13 && requestBody.answer === "") {
+        await route.fulfill({ status: 200, json: startingPointSetupView });
+        return;
+      }
     }
     if (path === "/api/sessions/session-setup/setup/confirm") {
       await new Promise((resolve) => setTimeout(resolve, 450));
@@ -511,6 +546,10 @@ for (const viewport of viewports) {
       await expect(page.locator(".save-card")).toHaveCSS("cursor", "auto");
       await page.getByRole("button", { name: `打开存档：${setupSession.name}` }).click();
       await expect(page.getByRole("heading", { name: setupView.current.title })).toBeVisible();
+      const originInput = page.getByRole("textbox", { name: setupView.current.title });
+      await expect(originInput).toHaveValue("混血家庭");
+      await page.getByRole("button", { name: "纯血家族" }).click();
+      await expect(originInput).toHaveValue("纯血家族");
       await expect(page.getByText("父母双方都是巫师。你从小熟悉会动的照片、猫头鹰邮递和魔法社会礼仪，也可能背负古老家族的声誉与偏见。")).toBeVisible();
       await expect(page.getByText("家庭同时连接魔法界与麻瓜世界。你对两边都不完全陌生，也常常要在两套生活方式之间寻找自己的位置。")).toBeVisible();
       await expect(page.getByText("父母都是麻瓜。魔法曾以无法解释的意外出现在童年里，而霍格沃茨来信将第一次为这些怪事给出答案。")).toBeVisible();
@@ -550,6 +589,18 @@ for (const viewport of viewports) {
       await assertNoHorizontalOverflow(page);
     });
 
+    test("allows starting without a preset initial friend", async ({ page }) => {
+      await installApi(page, "setup-friends");
+      await page.goto("/");
+      await page.getByRole("button", { name: `打开存档：${setupSession.name}` }).click();
+
+      await expect(page.getByRole("heading", { name: "初始好友" })).toBeVisible();
+      const next = page.getByRole("button", { name: "不选择预设好友，继续" });
+      await expect(next).toBeEnabled();
+      await next.click();
+      await expect(page.getByRole("heading", { name: "剧情起点" })).toBeVisible();
+    });
+
     test("shows attribute calibration progress and keeps retry available after failure", async ({ page }) => {
       await installApi(page, "setup-confirm");
       await page.goto("/");
@@ -579,6 +630,7 @@ for (const viewport of viewports) {
       await expect(page.getByRole("heading", { name: turnResponse.turn.title })).toBeVisible();
       await expect(page.getByText("日期：1991-09-03")).toBeVisible();
       await expect(page.getByText("地点：图书馆")).toBeVisible();
+      await expect(page.getByText("ollivanders", { exact: true })).toHaveCount(0);
       await expect(page.getByText("物品：古老书签", { exact: true })).toBeVisible();
       await expect(page.getByText("物品：sealed_box", { exact: true })).toBeVisible();
       await expect(page.getByText("风险：中")).toBeVisible();
@@ -641,6 +693,21 @@ for (const viewport of viewports) {
       await expect(skillsSection.getByText("transfiguration", { exact: true })).toHaveCount(0);
     });
 
+    test("translates course term and affected worldline nodes", async ({ page }) => {
+      await installApi(page, "story");
+      await page.goto("/");
+      await page.getByRole("button", { name: `打开存档：${activeSession.name}` }).click();
+
+      await page.getByRole("button", { name: "课程" }).click();
+      await expect(page.getByText("学期", { exact: true })).toBeVisible();
+      await expect(page.getByText("秋季", { exact: true })).toBeVisible();
+      await expect(page.getByText("autumn", { exact: true })).toHaveCount(0);
+
+      await page.getByRole("button", { name: "世界线" }).click();
+      await expect(page.getByText("霍格沃茨来信与入学", { exact: true })).toBeVisible();
+      await expect(page.getByText("first_letter_and_enrollment", { exact: true })).toHaveCount(0);
+    });
+
     test("browses previous story nodes without allowing historical choices", async ({ page }) => {
       await installApi(page, "story");
       await page.goto("/");
@@ -653,6 +720,7 @@ for (const viewport of viewports) {
 
       await previous.click();
       await expect(page.getByRole("heading", { name: previousTurnResponse.turn.title })).toBeVisible();
+      await expect(page.getByText("地点：奥利凡德魔杖店")).toBeVisible();
       await expect(page.getByText("正在浏览历史剧情节点，选项仅供查看")).toBeVisible();
       await expect(page.getByRole("button", { name: "拆开信封，看看里面写了什么" })).toBeDisabled();
       await expect(next).toBeEnabled();
@@ -696,8 +764,10 @@ for (const viewport of viewports) {
       await page.getByRole("button", { name: `打开存档：${activeSession.name}` }).click();
 
       const freeTextInput = page.getByPlaceholder("写下一个不在预言之中的行动…");
-      const reshapeTrigger = page.getByRole("button", { name: /重塑命运/ });
+      const reshapeTrigger = page.getByRole("button", { name: /重新生成/ });
       await expect(reshapeTrigger).toBeVisible();
+      await expect(reshapeTrigger).toContainText("重塑命运");
+      await expect(reshapeTrigger).toContainText("重新生成：让羽毛笔重新写下你的故事");
       const freeTextBox = await freeTextInput.boundingBox();
       const reshapeBox = await reshapeTrigger.boundingBox();
       expect(freeTextBox).not.toBeNull();

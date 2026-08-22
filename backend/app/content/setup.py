@@ -241,7 +241,7 @@ SETUP_STEPS = [
     SetupStep(
         step=13,
         title="初始好友",
-        description="可选择多位原著人物，也可以输入自定义姓名。选择的人物会以朋友身份进入关系列表并获得初始好感。",
+        description="可选择多位原著人物，也可以输入自定义姓名。选择的人物会以朋友身份进入关系列表并获得初始好感；也可以不选择任何预设好友，独自开始故事。",
         selection_mode="append",
         options=[
             option("harry_potter", "哈利·波特", "安静但勇敢，对真诚的友谊十分珍惜。", value="哈利·波特", appendable=True),

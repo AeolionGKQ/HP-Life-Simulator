@@ -170,7 +170,7 @@ export function App() {
   useEffect(() => {
     if (!setup || setup.completed) return;
     const savedAnswer = setup.answers[String(setup.current_step)];
-    setSetupAnswer(typeof savedAnswer === "string" ? savedAnswer : "");
+    setSetupAnswer(formatSetupInputAnswer(setup.current_step, savedAnswer));
   }, [setup?.current_step, setup?.completed]);
 
   async function handleCreateSession() {
@@ -193,7 +193,11 @@ export function App() {
     if (
       !selectedSessionId ||
       !setup ||
-      (!setupAnswer.trim() && setup.current_step !== 17)
+      (
+        !setupAnswer.trim()
+        && setup.current_step !== 13
+        && setup.current_step !== 17
+      )
     ) return;
     setSetupLoading(true);
     setError("");
@@ -386,10 +390,12 @@ export function App() {
 
   function chooseSetupOption(
     value: string,
+    label: string,
     mode: "single" | "append" | "text" | "confirm",
   ) {
+    const inputValue = formatSetupOptionValue(setup?.current_step, value, label);
     if (mode !== "append") {
-      setSetupAnswer(value);
+      setSetupAnswer(inputValue);
       return;
     }
     const values = setupAnswer
@@ -397,16 +403,24 @@ export function App() {
       .split(",")
       .map((item) => item.trim())
       .filter(Boolean);
-    if (!values.includes(value)) values.push(value);
+    if (!values.includes(inputValue)) values.push(inputValue);
     setSetupAnswer(values.join("，"));
   }
 
   function isSelectedOption(value: string): boolean {
+    const option = setup?.current.options.find(
+      (item) => (item.value ?? item.label) === value,
+    );
+    const inputValue = formatSetupOptionValue(
+      setup?.current_step,
+      value,
+      option?.label ?? value,
+    );
     return setupAnswer
       .replaceAll("，", ",")
       .split(",")
       .map((item) => item.trim())
-      .includes(value);
+      .includes(inputValue);
   }
 
   return (
@@ -547,7 +561,11 @@ export function App() {
                               className={isSelectedOption(value) ? "setup-option selected" : "setup-option"}
                               disabled={!option.available}
                               key={option.id}
-                              onClick={() => option.available && chooseSetupOption(value, setup.current.selection_mode)}
+                              onClick={() => option.available && chooseSetupOption(
+                                value,
+                                option.label,
+                                setup.current.selection_mode,
+                              )}
                             >
                               <strong>{option.label}</strong>
                               {option.description && <small>{option.description}</small>}
@@ -609,7 +627,11 @@ export function App() {
                       }
                       disabled={
                         setupLoading ||
-                        (!setupAnswer.trim() && setup.current_step !== 17)
+                        (
+                          !setupAnswer.trim()
+                          && setup.current_step !== 13
+                          && setup.current_step !== 17
+                        )
                       }
                       onClick={() => void submitSetupAnswer()}
                     >
@@ -617,8 +639,10 @@ export function App() {
                         ? "保存中…"
                         : setup.current_step === 1
                           ? "以所选世代继续"
-                          : setup.current_step === 17 && !setupAnswer.trim()
-                            ? "不再补充，继续"
+                          : setup.current_step === 13 && !setupAnswer.trim()
+                            ? "不选择预设好友，继续"
+                            : setup.current_step === 17 && !setupAnswer.trim()
+                              ? "不再补充，继续"
                             : "下一步"}
                     </button>
                   </>
@@ -835,6 +859,25 @@ const STARTING_POINT_LABELS: Record<string, string> = {
   platform_nine_three_quarters: "九又四分之三站台",
   sorting_ceremony: "分院时",
 };
+
+const ORIGIN_LABELS: Record<string, string> = {
+  pure_blood: "纯血家族",
+  half_blood: "混血家庭",
+  muggle_born: "麻瓜出身",
+};
+
+function formatSetupOptionValue(
+  step: number | undefined,
+  value: string,
+  label: string,
+): string {
+  return step === 6 ? ORIGIN_LABELS[value] ?? label : value;
+}
+
+function formatSetupInputAnswer(step: number, answer: unknown): string {
+  if (typeof answer !== "string") return "";
+  return step === 6 ? ORIGIN_LABELS[answer] ?? answer : answer;
+}
 
 function formatStartingPointAnswer(answer: unknown): string {
   const value = String(answer ?? "");

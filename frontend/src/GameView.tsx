@@ -219,6 +219,7 @@ export function GameView({
         ...context,
         current_date: visibleResponse.turn.current_date,
         location_id: visibleResponse.turn.location_id,
+        location_name: visibleResponse.turn.location_name,
       }
     : context;
   const displayWorldline = visibleResponse?.worldline ?? worldline;
@@ -312,7 +313,10 @@ export function GameView({
               <Stat label="年龄" value={`${identity.age ?? "未记录"} 岁`} />
               <Stat label="年级" value={translateGrade(player.school?.grade)} />
               <Stat label="学院" value={translateValue(player.school?.house ?? "unknown")} />
-              <Stat label="地点" value={translateValue(context.location_id ?? "unknown")} />
+              <Stat
+                label="地点"
+                value={context.location_name || translateValue(context.location_id ?? "unknown")}
+              />
             </div>
             <ResourceSection resources={resources} />
             <DimensionSection dimensions={dimensions} />
@@ -511,7 +515,9 @@ export function GameView({
         <>
           <div className="game-meta">
             <span>日期：{displayContext.current_date ?? formatStoryDate(displayContext.datetime) ?? "1991-07-01"}</span>
-            <span>地点：{translateValue(displayContext.location_id ?? "unknown")}</span>
+            <span>
+              地点：{displayContext.location_name || translateValue(displayContext.location_id ?? "unknown")}
+            </span>
             <span>世界线 {Number(displayWorldline.offset_rate ?? 0).toFixed(1)}%</span>
           </div>
           {!hasStarted ? (
@@ -588,7 +594,7 @@ export function GameView({
                   >
                     <span>
                       <strong>重塑命运</strong>
-                      <small>这一页的墨迹还没有封存？让羽毛笔重新书写本节点。</small>
+                      <small>重新生成：让羽毛笔重新写下你的故事</small>
                     </span>
                     <span aria-hidden="true">✦</span>
                   </button>
@@ -1063,6 +1069,10 @@ const VALUE_LABELS: Record<string, string> = {
   normal: "正常",
   positive: "正面",
   negative: "负面",
+  summer: "夏季",
+  autumn: "秋季",
+  spring: "春季",
+  winter: "冬季",
   morning: "清晨",
   afternoon: "午后",
   evening: "傍晚",
@@ -1074,6 +1084,13 @@ const VALUE_LABELS: Record<string, string> = {
   library: "图书馆",
   hogwarts_library: "霍格沃茨图书馆",
   hogwarts: "霍格沃茨",
+  ollivanders: "奥利凡德魔杖店",
+  flourish_and_blotts: "丽痕书店",
+  madam_malkins: "摩金夫人长袍店",
+  gringotts: "古灵阁",
+  leaky_cauldron: "破釜酒吧",
+  king_cross_station: "国王十字车站",
+  great_hall: "霍格沃茨礼堂",
   unknown: "未知地点",
   gryffindor: "格兰芬多",
   hufflepuff: "赫奇帕奇",
@@ -1082,6 +1099,22 @@ const VALUE_LABELS: Record<string, string> = {
   before_first_letter: "等待霍格沃茨来信",
   sorting_ceremony: "分院仪式",
   ready_for_first_scene: "等待命运启程",
+  letter_and_enrollment: "来信与入学",
+  first_letter_and_enrollment: "霍格沃茨来信与入学",
+  castle_old_secrets: "城堡旧秘密",
+  philosophers_stone_protections: "魔法石的秘密防线",
+  chamber_and_fear: "密室与恐惧",
+  chamber_of_secrets: "密室之谜",
+  fugitive_and_time: "逃犯与时间",
+  sirius_escape: "小天狼星越狱",
+  tournament_and_war_shadow: "比赛与战争阴影",
+  triwizard_tournament: "三强争霸赛",
+  dark_lord_return: "黑魔王归来",
+  resistance_and_battle: "分裂、抵抗与霍格沃茨之战",
+  da_resistance: "D.A.抵抗行动",
+  astronomy_tower: "天文塔悲剧",
+  battle_of_hogwarts: "霍格沃茨之战",
+  postwar_aftermath: "战后余波",
   true: "是",
   false: "否",
 };
