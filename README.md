@@ -76,7 +76,8 @@
 
 ### 你需要
 
-- Windows 10 或 Windows 11；
+- Windows 10 或 Windows 11（可以使用双击启动器）；
+- macOS 或 Linux（需要使用下文的手动启动方式）；
 - Python 3.12 或更高版本；
 - Node.js LTS；
 - 一个支持 OpenAI-compatible Chat Completions 的模型服务；
@@ -86,9 +87,10 @@
 
 ### 第一次启动
 
-1. 克隆仓库，或从 GitHub 下载并解压游戏。
-2. 把 `config/settings.example.toml` 复制为 `config/settings.local.toml`。
-3. 打开新的本地配置文件，填写模型服务：
+1. 克隆仓库，或从 GitHub 下载并完整解压游戏。
+2. 双击 **`start_hp_simulator.bat`**。
+3. 启动器会自动创建项目专用的 `.venv`、安装前后端依赖，并在缺少本地配置时创建 `config/settings.local.toml`。
+4. 浏览器打开后，在页面右上角进入模型配置，填写 Base URL、API Key 和模型名称；也可以直接编辑本地配置文件：
 
 ```toml
 [llm]
@@ -99,14 +101,72 @@ timeout_seconds = 300
 temperature = 0.8
 ```
 
-4. 双击 **`start_hp_simulator.bat`**。
-5. 第一次启动会准备所需环境；耐心等待浏览器自动打开。
-
 如果浏览器没有自动出现，请手动访问：
 
 ```text
 http://127.0.0.1:5173
 ```
+
+启动器只适用于 Windows。它会检查 Python 与 Node.js 版本、使用项目自己的 Python 虚拟环境、按照依赖锁文件准备前端，并在端口被其他程序占用时给出明确提示。首次安装需要联网，之后通常可以直接双击启动。
+
+### 不使用 BAT 的备用启动方式
+
+如果你使用 macOS、Linux，或者 Windows 启动器被安全软件拦截，可以手动启动。以下命令都要在项目根目录执行，并保持后端和前端两个终端窗口同时运行。
+
+先准备本地配置。Windows PowerShell：
+
+```powershell
+Copy-Item config/settings.example.toml config/settings.local.toml
+```
+
+macOS 或 Linux：
+
+```bash
+cp config/settings.example.toml config/settings.local.toml
+```
+
+如果文件已经存在，不要覆盖，以免丢失已经填写的 API Key。
+
+然后在第一个终端启动后端。
+
+Windows PowerShell：
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\python.exe -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
+```
+
+如果电脑没有 `py` 命令，但 `python` 指向 Python 3.12 或更高版本，可以把第一行改为：
+
+```powershell
+python -m venv .venv
+```
+
+macOS 或 Linux：
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e .
+python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
+```
+
+再打开第二个终端，启动前端。Windows、macOS 和 Linux 使用相同命令：
+
+```bash
+cd frontend
+npm ci
+npm run dev -- --strictPort
+```
+
+看到前后端都启动成功后，在浏览器访问：
+
+```text
+http://127.0.0.1:5173
+```
+
+第二次及之后启动时，只需分别运行后端的 `uvicorn` 命令和前端的 `npm run dev -- --strictPort`；只有依赖文件更新、虚拟环境损坏或重新下载项目时才需要再次安装依赖。
 
 ### Base URL 应该怎么填
 

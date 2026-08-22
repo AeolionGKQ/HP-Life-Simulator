@@ -2,29 +2,38 @@ $ErrorActionPreference = "SilentlyContinue"
 
 $frontendUrl = "http://127.0.0.1:5173"
 $healthUrl = "http://127.0.0.1:8000/api/health"
-$maxAttempts = 60
-$ready = $false
+$maxAttempts = 90
+$frontendReady = $false
+$backendReady = $false
+
+function Test-HttpEndpoint {
+    param([string]$Uri)
+
+    try {
+        $response = Invoke-WebRequest `
+            -Uri $Uri `
+            -UseBasicParsing `
+            -TimeoutSec 1
+        return $response.StatusCode -ge 200 -and $response.StatusCode -lt 500
+    } catch {
+        return $false
+    }
+}
 
 for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
-    try {
-        $frontendResponse = Invoke-WebRequest -Uri $frontendUrl -UseBasicParsing -TimeoutSec 2
-        if ($frontendResponse.StatusCode -ge 200 -and $frontendResponse.StatusCode -lt 500) {
-            $ready = $true
-            break
-        }
-    } catch {
-        Start-Sleep -Seconds 1
+    $frontendReady = Test-HttpEndpoint $frontendUrl
+    $backendReady = Test-HttpEndpoint $healthUrl
+    if ($frontendReady -and $backendReady) {
+        Start-Process $frontendUrl
+        exit 0
     }
+    Start-Sleep -Seconds 1
 }
 
-if ($ready) {
-    Start-Process $frontendUrl
-} else {
-    Write-Host "The frontend did not respond in time. Check the frontend terminal." -ForegroundColor Yellow
-    try {
-        Start-Process $healthUrl
-    } catch {
-        Start-Process $frontendUrl
-    }
-}
+Write-Host ""
+Write-Host "[ERROR] The game did not become ready in time." -ForegroundColor Red
+Write-Host "Backend ready: $backendReady"
+Write-Host "Frontend ready: $frontendReady"
+Write-Host "Review the backend and frontend windows for the detailed error."
+exit 1
 
