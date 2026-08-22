@@ -15,6 +15,10 @@ from backend.app.models import (
 from backend.app.content.mainlines import build_generation_context
 from backend.app.content.attributes import catalog_for_prompt
 from backend.app.content.school import normalize_grade
+from backend.app.content.origins import (
+    get_origin_definition,
+    normalize_origin_id,
+)
 from backend.app.content.courses import COURSE_CATALOG, SKILL_LEVEL_MAX, SKILL_LEVEL_MIN
 from backend.app.content.reputation import reputation_summary
 
@@ -133,14 +137,84 @@ MEMORY_REQUEST_JSON_TEMPLATE_BEGIN
 }
 MEMORY_REQUEST_JSON_TEMPLATE_END"""
 
-PRE_ENROLLMENT_RULES = """当前角色尚未完成入学，必须遵守以下入学前约束：
-玩家在角色创建阶段选择的魔杖和学院只是未来设定或倾向，不代表已经获得魔杖或完成分院。
-在【奥利凡德魔杖店】剧情点之前，角色没有魔杖，不能使用魔杖施法、以魔杖完成动作或把魔杖当作已持有物品；
-即使角色创建时已经选择了魔杖，也必须等奥利凡德相关剧情实际发生后再获得。
-在【分院】剧情点之前，角色没有学院归属，不能进入学院公共休息室、以学院身份行动或使用学院声望；
-即使角色创建时已经选择了学院，也必须等分院剧情实际完成后再视为已分院。
-必须根据 player_state.family.bloodline 判断入学前认知：纯血和混血家庭知道魔法界与霍格沃茨并期待来信；
-麻瓜家庭不知道魔法界与霍格沃茨，也不应预先知道或期待霍格沃茨来信。"""
+CUSTOM_ORIGIN_PRE_ENROLLMENT_RULES = """当前角色的出身不是三种预设出身之一，不能套用纯血、混血或麻瓜的固定基础介绍。
+必须综合 player_state.family.origin_id、family.bloodline、family.description、
+background.childhood_experiences、character_notes.description 和 setup.answers 中的家庭线索，
+合理推断角色是否知道魔法界与魔法，并在后续剧情中保持这个判断一致。
+例如“火龙化成人”、曾在魔法社会生活或明确接触过巫师社会的设定，通常应判断为知道魔法界；
+明确由麻瓜抚养且从未接触魔法社会的设定，通常应判断为不知道；信息含糊时选择最合理解释。
+默认情况下大体维持“收到来信→前往对角巷→霍格沃兹特快→学校”的流程，
+但这只是默认背景，不是强制剧本；玩家明确选择或自由输入的行动优先。"""
+
+ORIGIN_PROMPT_FOOTER = """以上出身背景是当前阶段的默认叙事依据，不是强制剧情脚本。
+玩家明确选择或自由输入的行动优先，可以改变陪同者、抵达方式、时间节奏和具体事件；
+不得因为默认流程替玩家制造没有发生的事件，也不得覆盖程序权威状态。
+出身背景不得改变玩家选择的四种剧情起点；如果玩家从对角巷、九又四分之三站台或分院起点开始，
+不得倒放此前被跳过的收信、购物或列车流程。"""
+
+
+def build_origin_prompt_rules(
+    player_state: dict[str, Any],
+    *,
+    sorting_completed: bool,
+) -> str:
+    family = player_state.get("family", {})
+    if not isinstance(family, dict):
+        family = {}
+    origin_id = normalize_origin_id(
+        family.get("origin_id") or family.get("bloodline")
+    )
+    definition = get_origin_definition(origin_id)
+    sections: list[str] = []
+    if definition:
+        sections.append(
+            "【出身基础介绍｜持续有效】\n"
+            f"{definition['base_prompt']}\n"
+            "这句基础介绍是持续有效的角色背景事实，每轮都必须保持一致，"
+            "但不能覆盖玩家行动和程序权威状态。"
+        )
+    if not sorting_completed:
+        if definition:
+            sections.append(
+                "【分院前出身背景｜默认流程】\n"
+                f"{definition['pre_enrollment_prompt']}\n"
+                f"{ORIGIN_PROMPT_FOOTER}"
+            )
+        else:
+            sections.append(
+                "【分院前自定义出身推理｜默认流程】\n"
+                f"{CUSTOM_ORIGIN_PRE_ENROLLMENT_RULES}\n"
+                f"{ORIGIN_PROMPT_FOOTER}"
+            )
+    return "\n\n".join(sections)
+
+STARTING_POINT_RULES = """程序已经在 player_state.current_context 中确定了玩家选择的剧情起点。
+角色出身只能影响角色如何理解当前起点中的魔法界、人物和事件，不能因为自定义出身而跳转到另一个剧情起点。
+仅在第一回合展开当前起点的核心场景；后续回合必须承接已经发生的剧情，不要反复重演开篇。
+当 activity=before_first_letter 时，第一回合必须从 1991-07-01 家中收到猫头鹰送来的霍格沃茨来信展开；
+当 activity=diagon_alley 时，第一回合必须从第一次踏入对角巷的当前节点展开；
+当 activity=platform_nine_three_quarters 时，第一回合必须从 1991-09-01 九又四分之三站台的当前节点展开；
+当 activity=sorting_ceremony 时，第一回合必须从分院仪式的当前节点展开。
+不得把当前起点改写成其他起点，也不得因为角色知道或不知道魔法界而跳过玩家选定的起点。"""
+
+WAND_AVAILABILITY_RULES = """player_state.story_milestones.wand_obtained 当前为 false。
+角色创建时选择的魔杖只是未来设定，不代表已经获得实物。
+在【奥利凡德魔杖店】剧情真正完成之前，角色没有可用魔杖，不能使用魔杖施法、以魔杖完成动作或把魔杖当作已持有物品。
+只有本回合确实完成奥利凡德魔杖店剧情时，才在 events 中返回一次
+{"type":"wand_obtained","evidence":"说明魔杖已经在本回合被正式选中并获得"}；
+不要仅因为角色创建时填写过魔杖，就提前让角色使用它。"""
+
+SORTING_AVAILABILITY_RULES = """player_state.story_milestones.sorting_completed 当前为 false。
+角色创建时选择的学院只是未来倾向，不代表已经完成分院。
+在【分院】剧情真正完成之前，角色没有学院归属，不能进入学院公共休息室、以学院身份行动或使用学院声望。
+只有本回合确实完成分院仪式时，才在 events 中返回一次
+{"type":"sorting_completed","evidence":"说明分院仪式已经完成"}；
+不要仅因为角色创建时填写过学院，就提前让角色以该学院身份行动。
+正式入学仍必须使用合法的 school_transition，且 reason="sorting_completed"。"""
+
+STORY_MILESTONE_RULES = """events 只能记录本回合实际发生并完成的结构化剧情里程碑。
+程序只会识别 type 为 wand_obtained 或 sorting_completed 的里程碑；不要用它们表示愿望、计划、传闻、未来预告或模型推测。
+同一种里程碑一旦已经在 player_state.story_milestones 中为 true，后续回合不要重复返回。"""
 
 PATRONUS_RULES = """角色创建时选择的守护神形态会保存在 player_state.patronus 中，但这只是角色潜在的守护神形态。
 角色未学会【呼神护卫】时无法召唤守护神；只有 player_state.skills 明确记录已经掌握该技能后才可召唤。
@@ -282,6 +356,32 @@ def build_turn_messages(
         school = {}
     current_grade = normalize_grade(school)
     enrollment_started = bool(school.get("enrollment_started", current_grade != "not_enrolled"))
+    current_context = player_state.state.get("current_context", {})
+    if not isinstance(current_context, dict):
+        current_context = {}
+    wand_state = player_state.state.get("wand")
+    story_milestones = player_state.state.get("story_milestones", {})
+    if not isinstance(story_milestones, dict):
+        story_milestones = {}
+    wand_obtained = (
+        story_milestones.get("wand_obtained") is True
+        or (
+            isinstance(wand_state, dict)
+            and (
+                wand_state.get("obtained") is True
+                or wand_state.get("status") in {"obtained", "active"}
+            )
+        )
+    )
+    sorting_completed = (
+        story_milestones.get("sorting_completed") is True
+        or bool(school.get("sorting_completed"))
+        or enrollment_started
+    )
+    origin_prompt_rules = build_origin_prompt_rules(
+        player_state.state,
+        sorting_completed=sorting_completed,
+    )
     system = """你是《霍格沃兹人生模拟器》的剧情主持人。
 你只负责原创叙事、扮演 NPC、提出选项和提取长期事件记忆。
 必须尊重用户行动，不得替玩家选择。
@@ -358,13 +458,30 @@ course_selection 和 course_history 只能由程序与玩家课程 API 修改。
 
 {BOND_RULES}
 
-{NAME_AND_ADDRESS_RULES}"""
+        {NAME_AND_ADDRESS_RULES}"""
+    system = f"{system}\n\n{STORY_MILESTONE_RULES}"
     system = f"{system}\n\n{MAINLINE_CONTEXT_RULES}"
     system = f"{system}\n\n{FATE_INTERVENTION_RULES}"
     system = f"{system}\n\n{RESHAPE_FATE_RULES}"
     system = f"{system}\n\n{SCHOOL_DEPARTURE_RULES}"
-    if not enrollment_started:
-        system = f"{system}\n\n{PRE_ENROLLMENT_RULES}"
+    if origin_prompt_rules:
+        system = f"{system}\n\n{origin_prompt_rules}"
+    if (
+        not recent_turns
+        and current_context.get("activity")
+        in {
+            "before_first_letter",
+            "diagon_alley",
+            "platform_nine_three_quarters",
+            "sorting_ceremony",
+            "owl_letter_arrival",
+        }
+    ):
+        system = f"{system}\n\n{STARTING_POINT_RULES}"
+    if not wand_obtained:
+        system = f"{system}\n\n{WAND_AVAILABILITY_RULES}"
+    if not sorting_completed:
+        system = f"{system}\n\n{SORTING_AVAILABILITY_RULES}"
     system = f"{system}\n\n{TURN_OUTPUT_PROTOCOL}"
 
     generation_context = build_generation_context(
@@ -387,6 +504,7 @@ course_selection 和 course_history 只能由程序与玩家课程 API 修改。
         "school_rules": {
             "current_grade": current_grade,
             "enrollment_started": enrollment_started,
+            "sorting_completed": sorting_completed,
             "grade_is_program_authoritative": True,
             "departure_reason": school.get("departure_reason"),
             "departure_notice": school.get("departure_notice"),
@@ -424,7 +542,7 @@ course_selection 和 course_history 只能由程序与玩家课程 API 修改。
         "resources": player_state.state.get("resources", {}),
         "dimensions": player_state.state.get("dimensions", {}),
         "attribute_catalog": catalog_for_prompt(),
-        "protocol": {"name": "hp_simulator_turn", "version": "1.7"},
+        "protocol": {"name": "hp_simulator_turn", "version": "1.8"},
         "npcs": [
             {
                 "npc_id": npc.npc_id,
@@ -463,6 +581,10 @@ course_selection 和 course_history 只能由程序与玩家课程 API 修改。
             for summary in summaries
         ],
         "player_action": action,
+        "story_milestones": {
+            "wand_obtained": wand_obtained,
+            "sorting_completed": sorting_completed,
+        },
     }
     return [
         {"role": "system", "content": system},

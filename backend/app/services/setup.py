@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.content.setup import STARTING_POINT_IDS, get_setup_step
 from backend.app.content.eras import ERA_BY_ID, get_era
+from backend.app.content.origins import normalize_origin_id
 from backend.app.models import (
     GameSession,
     NPCState,
@@ -124,9 +125,13 @@ def _materialize_player_state(
     starting_point = _starting_point_id(answers.get("14"))
     era = get_era(era_id)
     era_start_year = int(str(era["years"]).split("–", 1)[0].replace("+", ""))
+    starts_in_september = starting_point in {
+        "platform_nine_three_quarters",
+        "sorting_ceremony",
+    }
     starting_date = date(
         era_start_year,
-        9 if starting_point == "sorting_ceremony" else 7,
+        9 if starts_in_september else 7,
         1,
     )
     state["identity"] = {
@@ -140,8 +145,10 @@ def _materialize_player_state(
         appearance if isinstance(appearance, dict) else {"description": appearance}
     )
     family = answers.get("6", "未设定")
+    family_text = _normalize_answer(family)
     state["family"] = {
-        "bloodline": _normalize_answer(family),
+        "origin_id": normalize_origin_id(family),
+        "bloodline": family_text,
         "description": "你的家族背景将在故事中逐渐展开。",
     }
     childhood = answers.get("7", "")
@@ -157,7 +164,19 @@ def _materialize_player_state(
     }
     values = answers.get("9", "")
     state["values"] = {"description": values}
-    state["wand"] = {"description": answers.get("10")}
+    wand_obtained = starting_point in {
+        "platform_nine_three_quarters",
+        "sorting_ceremony",
+    }
+    state["wand"] = {
+        "description": answers.get("10"),
+        "obtained": wand_obtained,
+        "status": "obtained" if wand_obtained else "not_obtained",
+    }
+    state["story_milestones"] = {
+        "wand_obtained": wand_obtained,
+        "sorting_completed": False,
+    }
     talent_values = _split_multi_answer(answers.get("11", "魔法基础"))
     state["magic_talents"] = [
         {
@@ -189,11 +208,13 @@ def _materialize_player_state(
         "datetime": (
             f"{era_start_year:04d}-09-01T17:30:00+00:00"
             if starting_point == "sorting_ceremony"
+            else f"{era_start_year:04d}-09-01T10:30:00+00:00"
+            if starting_point == "platform_nine_three_quarters"
             else f"{era_start_year:04d}-07-01T09:00:00+00:00"
         ),
         "current_date": (
             f"{era_start_year:04d}-09-01"
-            if starting_point == "sorting_ceremony"
+            if starts_in_september
             else f"{era_start_year:04d}-07-01"
         ),
         "period": "evening" if starting_point == "sorting_ceremony" else "morning",
@@ -208,11 +229,12 @@ def _materialize_player_state(
     school = state.setdefault("school", {})
     school["grade"] = "not_enrolled"
     school["enrollment_started"] = False
+    school["sorting_completed"] = False
     state["school"]["school_year"] = f"{era_start_year}-{era_start_year + 1}"
     school["grade_started_year"] = None
     school["last_grade_promotion_key"] = None
     school["last_course_progression_year"] = None
-    school["term"] = "autumn" if starting_point == "sorting_ceremony" else "summer"
+    school["term"] = "autumn" if starts_in_september else "summer"
     school["newt_courses"] = []
     school["course_selection"] = None
     school["course_history"] = []
@@ -264,6 +286,8 @@ def _stable_content_id(value: str) -> str:
 def _starting_point_id(value: Any) -> str:
     normalized = _normalize_answer(value)
     mapping = {
+        "owl_letter_arrival": "before_first_letter",
+        "before_letter": "before_first_letter",
         "收到霍格沃茨来信之前": "before_first_letter",
         "第一次踏入对角巷": "diagon_alley",
         "九又四分之三站台": "platform_nine_three_quarters",

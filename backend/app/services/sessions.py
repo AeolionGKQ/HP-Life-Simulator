@@ -48,6 +48,7 @@ def initial_player_state() -> dict[str, Any]:
             "house": None,
             "grade": "not_enrolled",
             "enrollment_started": False,
+            "sorting_completed": False,
             "school_year": "1991-1992",
             "grade_started_year": None,
             "last_grade_promotion_key": None,
@@ -74,6 +75,10 @@ def initial_player_state() -> dict[str, Any]:
         "magic_talents": [],
         "traits": [],
         "wand": None,
+        "story_milestones": {
+            "wand_obtained": False,
+            "sorting_completed": False,
+        },
         "currency": {"galleons": 0, "sickles": 0, "knuts": 0},
         "inventory": [],
         "pet": None,

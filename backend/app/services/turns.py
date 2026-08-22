@@ -786,7 +786,7 @@ async def _reshape_latest_turn(
     }
     latest.memory_update = response.memory_update.model_dump()
     latest.worldline = response.worldline.model_dump()
-    latest.prompt_version = "v1.7-reshape"
+    latest.prompt_version = "v1.8-reshape"
     latest.model_name = settings.llm.model
     latest.state_version_before = state_version_before
     latest.state_version_after = game_session.state_version
@@ -1045,7 +1045,7 @@ async def generate_turn(
         },
         memory_update=response.memory_update.model_dump(),
         worldline=response.worldline.model_dump(),
-        prompt_version="v1.6-bonds",
+        prompt_version="v1.8-milestones",
         model_name=settings.llm.model,
         state_version_before=payload.expected_state_version,
         state_version_after=game_session.state_version,

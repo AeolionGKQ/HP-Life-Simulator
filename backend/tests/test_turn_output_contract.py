@@ -31,7 +31,7 @@ def _extract_json_template(system_prompt: str, name: str) -> dict[str, Any]:
     return json.loads(template.strip())
 
 
-def _build_messages() -> list[dict[str, str]]:
+def _build_messages(state: dict[str, Any] | None = None) -> list[dict[str, str]]:
     return build_turn_messages(
         game_session=SimpleNamespace(
             id="session-1",
@@ -39,7 +39,7 @@ def _build_messages() -> list[dict[str, str]]:
             status="active",
             state_version=1,
         ),
-        player_state=SimpleNamespace(state={}),
+        player_state=SimpleNamespace(state=state or {}),
         npcs=[],
         relationships=[],
         recent_turns=[],
@@ -103,6 +103,188 @@ def test_turn_system_prompt_contains_parseable_response_templates() -> None:
     assert "每轮最多创建一个新 NPC" in system_prompt
     assert "NPC 年龄未知" in system_prompt
     assert "committed、adult_stage 和 marriage" in system_prompt
+
+
+def test_custom_origin_uses_reasoned_magic_world_knowledge_rule() -> None:
+    messages = _build_messages(
+        {
+            "family": {
+                "bloodline": "火龙化成人",
+                "description": "曾在偏远山谷生活。",
+            },
+            "background": {
+                "childhood_experiences": ["见过巫师施法"],
+            },
+            "character_notes": {
+                "description": "保留龙形记忆，但以人类身份生活。",
+            },
+            "current_context": {
+                "current_date": "1991-07-01",
+                "location_id": "home",
+                "activity": "before_first_letter",
+            },
+        }
+    )
+    system_prompt = messages[0]["content"]
+    context = json.loads(messages[1]["content"].split("\n", 1)[1])
+
+    assert "不是三种预设出身之一" in system_prompt
+    assert "收到来信→前往对角巷→霍格沃兹特快→学校" in system_prompt
+    assert "不能因为自定义出身而跳转到另一个剧情起点" in system_prompt
+    assert "出身背景不得改变玩家选择的四种剧情起点" in system_prompt
+    assert "activity=before_first_letter" in system_prompt
+    assert "1991-07-01" in system_prompt
+    assert "来自巫师家庭，自幼熟悉魔法界的生活、礼仪与常识。" not in system_prompt
+    assert "家庭同时连接巫师社会与麻瓜社会，角色从小接触过两种生活方式。" not in system_prompt
+    assert "父母都是麻瓜，角色在收到霍格沃兹来信前一直生活在麻瓜社会。" not in system_prompt
+    assert context["player_state"]["family"]["bloodline"] == "火龙化成人"
+    assert context["player_state"]["current_context"]["activity"] == "before_first_letter"
+
+
+@pytest.mark.parametrize(
+    ("origin_id", "base_prompt", "pre_enrollment_prompt"),
+    [
+        (
+            "pure_blood",
+            "来自巫师家庭，自幼熟悉魔法界的生活、礼仪与常识。",
+            "已经熟知魔法界与魔法，会期待霍格沃兹的来信",
+        ),
+        (
+            "half_blood",
+            "家庭同时连接巫师社会与麻瓜社会，角色从小接触过两种生活方式。",
+            "对魔法界与魔法有基础的认知，会期待霍格沃兹的来信",
+        ),
+        (
+            "muggle_born",
+            "父母都是麻瓜，角色在收到霍格沃兹来信前一直生活在麻瓜社会。",
+            "对魔法界与魔法毫无认知，不会期待霍格沃兹的来信",
+        ),
+    ],
+)
+def test_preset_origin_prompt_contains_persistent_and_pre_enrollment_rules(
+    origin_id: str,
+    base_prompt: str,
+    pre_enrollment_prompt: str,
+) -> None:
+    system_prompt = _build_messages(
+        {
+            "family": {
+                "origin_id": origin_id,
+                "bloodline": origin_id,
+            },
+            "school": {
+                "grade": "not_enrolled",
+                "enrollment_started": False,
+                "sorting_completed": False,
+            },
+        }
+    )[0]["content"]
+
+    assert base_prompt in system_prompt
+    assert pre_enrollment_prompt in system_prompt
+    assert "默认叙事依据，不是强制剧情脚本" in system_prompt
+
+
+@pytest.mark.parametrize(
+    ("origin_id", "base_prompt", "pre_enrollment_prompt"),
+    [
+        (
+            "pure_blood",
+            "来自巫师家庭，自幼熟悉魔法界的生活、礼仪与常识。",
+            "已经熟知魔法界与魔法，会期待霍格沃兹的来信",
+        ),
+        (
+            "half_blood",
+            "家庭同时连接巫师社会与麻瓜社会，角色从小接触过两种生活方式。",
+            "对魔法界与魔法有基础的认知，会期待霍格沃兹的来信",
+        ),
+        (
+            "muggle_born",
+            "父母都是麻瓜，角色在收到霍格沃兹来信前一直生活在麻瓜社会。",
+            "对魔法界与魔法毫无认知，不会期待霍格沃兹的来信",
+        ),
+    ],
+)
+def test_preset_origin_pre_enrollment_rules_are_removed_after_sorting(
+    origin_id: str,
+    base_prompt: str,
+    pre_enrollment_prompt: str,
+) -> None:
+    system_prompt = _build_messages(
+        {
+            "family": {
+                "origin_id": origin_id,
+                "bloodline": origin_id,
+            },
+            "school": {
+                "grade": "year_1",
+                "enrollment_started": True,
+                "sorting_completed": True,
+            },
+        }
+    )[0]["content"]
+
+    assert base_prompt in system_prompt
+    assert pre_enrollment_prompt not in system_prompt
+    assert "【分院前出身背景｜默认流程】" not in system_prompt
+
+
+def test_custom_origin_pre_enrollment_rules_are_removed_after_sorting() -> None:
+    system_prompt = _build_messages(
+        {
+            "family": {
+                "origin_id": "custom",
+                "bloodline": "火龙化成人",
+            },
+            "school": {
+                "grade": "year_1",
+                "enrollment_started": True,
+                "sorting_completed": True,
+            },
+        }
+    )[0]["content"]
+
+    assert "【分院前自定义出身推理｜默认流程】" not in system_prompt
+    assert "收信→前往对角巷→霍格沃兹特快→学校" not in system_prompt
+    assert "【出身基础介绍｜持续有效】" not in system_prompt
+
+
+@pytest.mark.parametrize(
+    ("wand_obtained", "sorting_completed"),
+    [(True, False), (False, True), (True, True)],
+)
+def test_milestone_rules_are_removed_independently(
+    wand_obtained: bool,
+    sorting_completed: bool,
+) -> None:
+    system_prompt = _build_messages(
+        {
+            "wand": {
+                "description": "冬青木，独角兽毛",
+                "obtained": wand_obtained,
+                "status": "obtained" if wand_obtained else "not_obtained",
+            },
+                "story_milestones": {
+                    "wand_obtained": wand_obtained,
+                    "sorting_completed": sorting_completed,
+                },
+                "family": {
+                    "origin_id": "half_blood",
+                    "bloodline": "混血家庭",
+                },
+                "school": {
+                "grade": "not_enrolled",
+                "enrollment_started": False,
+                "sorting_completed": sorting_completed,
+            },
+        }
+    )[0]["content"]
+
+    wand_rule = "player_state.story_milestones.wand_obtained 当前为 false"
+    sorting_rule = "player_state.story_milestones.sorting_completed 当前为 false"
+    assert (wand_rule in system_prompt) is (not wand_obtained)
+    assert (sorting_rule in system_prompt) is (not sorting_completed)
+    assert "家庭同时连接巫师社会与麻瓜社会，角色从小接触过两种生活方式。" in system_prompt
 
 
 def test_turn_context_contains_layered_generation_background() -> None:

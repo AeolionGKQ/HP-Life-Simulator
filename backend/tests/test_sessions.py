@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from backend.app.db.session import get_session_factory
 from backend.app.providers.openai_compatible import OpenAICompatibleProvider
 from backend.app.main import create_app
+from backend.app.content.setup import get_setup_step
 from backend.app.models import (
     GameSession,
     JournalEntry,
@@ -17,6 +18,7 @@ from backend.app.models import (
     StorySummary,
     TurnRecord,
 )
+from backend.app.services.setup import _materialize_player_state
 
 
 @pytest.fixture(autouse=True)
@@ -76,13 +78,59 @@ def test_create_and_read_session() -> None:
         assert "attributes" not in detail.json()["player_state"]
 
 
+def test_origin_setup_options_have_three_preset_descriptions() -> None:
+    step = get_setup_step(6)
+
+    assert [option.value for option in step.options] == [
+        "pure_blood",
+        "half_blood",
+        "muggle_born",
+    ]
+    assert all(option.description for option in step.options)
+    assert "父母双方都是巫师" in step.options[0].description
+    assert "同时连接魔法界与麻瓜世界" in step.options[1].description
+    assert "父母都是麻瓜" in step.options[2].description
+
+
 def test_starting_point_accepts_only_predefined_story_nodes() -> None:
     with TestClient(create_app()) as client:
-        created = client.post("/api/sessions", json={"name": "预设起点测试"})
-        session_id = created.json()["id"]
+        for starting_point in (
+            "before_first_letter",
+            "diagon_alley",
+            "platform_nine_three_quarters",
+            "sorting_ceremony",
+        ):
+            created = client.post(
+                "/api/sessions",
+                json={"name": f"预设起点测试-{starting_point}"},
+            )
+            session_id = created.json()["id"]
+            with get_session_factory()() as db:
+                player_state = db.scalar(
+                    select(PlayerState).where(PlayerState.session_id == session_id)
+                )
+                assert player_state is not None
+                state = dict(player_state.state)
+                setup = dict(state["setup"])
+                setup["current_step"] = 14
+                state["setup"] = setup
+                player_state.state = state
+                db.commit()
+
+            selected = client.post(
+                f"/api/sessions/{session_id}/setup/answer",
+                json={"step": 14, "answer": starting_point},
+            )
+            assert selected.status_code == 200
+            assert selected.json()["answers"]["14"] == starting_point
+
+        legacy_session_id = client.post(
+            "/api/sessions",
+            json={"name": "旧起点兼容测试"},
+        ).json()["id"]
         with get_session_factory()() as db:
             player_state = db.scalar(
-                select(PlayerState).where(PlayerState.session_id == session_id)
+                select(PlayerState).where(PlayerState.session_id == legacy_session_id)
             )
             assert player_state is not None
             state = dict(player_state.state)
@@ -93,18 +141,94 @@ def test_starting_point_accepts_only_predefined_story_nodes() -> None:
             db.commit()
 
         custom = client.post(
-            f"/api/sessions/{session_id}/setup/answer",
+            f"/api/sessions/{legacy_session_id}/setup/answer",
             json={"step": 14, "answer": "我想从密室开启故事"},
         )
         assert custom.status_code == 409
         assert "预设节点" in custom.json()["detail"]
 
-        selected = client.post(
-            f"/api/sessions/{session_id}/setup/answer",
-            json={"step": 14, "answer": "sorting_ceremony"},
+        legacy = client.post(
+            f"/api/sessions/{legacy_session_id}/setup/answer",
+            json={"step": 14, "answer": "owl_letter_arrival"},
         )
-        assert selected.status_code == 200
-        assert selected.json()["answers"]["14"] == "sorting_ceremony"
+        assert legacy.status_code == 200
+        assert legacy.json()["answers"]["14"] == "owl_letter_arrival"
+
+
+@pytest.mark.parametrize(
+    ("starting_point", "expected_date", "expected_location", "wand_obtained", "term"),
+    [
+        ("before_first_letter", "1991-07-01", "home", False, "summer"),
+        ("diagon_alley", "1991-07-01", "diagon_alley", False, "summer"),
+        (
+            "platform_nine_three_quarters",
+            "1991-09-01",
+            "platform_nine_three_quarters",
+            True,
+            "autumn",
+        ),
+        ("sorting_ceremony", "1991-09-01", "hogwarts_great_hall", True, "autumn"),
+    ],
+)
+def test_custom_origin_cannot_change_selected_starting_point(
+    starting_point: str,
+    expected_date: str,
+    expected_location: str,
+    wand_obtained: bool,
+    term: str,
+) -> None:
+    state: dict = {"school": {}}
+    answers = {
+        "2": "龙裔",
+        "3": "未设定",
+        "4": "1980-03-12",
+        "6": "火龙化成人",
+        "7": ["见过巫师施法"],
+        "10": "冬青木，龙心弦",
+        "11": "咒语直觉",
+        "14": starting_point,
+        "15": "gryffindor",
+    }
+
+    _materialize_player_state(state, answers, "second_generation")
+
+    assert state["family"]["origin_id"] == "custom"
+    assert state["current_context"]["current_date"] == expected_date
+    assert state["current_context"]["location_id"] == expected_location
+    assert state["current_context"]["activity"] == starting_point
+    assert state["wand"]["obtained"] is wand_obtained
+    assert state["story_milestones"]["wand_obtained"] is wand_obtained
+    assert state["school"]["term"] == term
+
+
+@pytest.mark.parametrize(
+    ("raw_origin", "expected_origin_id"),
+    [
+        ("pure_blood", "pure_blood"),
+        ("纯血家族", "pure_blood"),
+        ("half_blood", "half_blood"),
+        ("混血家庭", "half_blood"),
+        ("muggle_born", "muggle_born"),
+        ("麻瓜出身", "muggle_born"),
+        ("火龙化成人", "custom"),
+    ],
+)
+def test_origin_values_are_normalized_during_state_materialization(
+    raw_origin: str,
+    expected_origin_id: str,
+) -> None:
+    state: dict = {"school": {}}
+    answers = {
+        "4": "1980-03-12",
+        "6": raw_origin,
+        "14": "before_first_letter",
+        "15": "gryffindor",
+    }
+
+    _materialize_player_state(state, answers, "second_generation")
+
+    assert state["family"]["origin_id"] == expected_origin_id
+    assert state["family"]["bloodline"] == raw_origin
 
 
 def test_acknowledge_departure_notice_persists_and_increments_state_version() -> None:
@@ -402,6 +526,7 @@ def test_setup_initial_friends_and_sorting_start() -> None:
             "咒语直觉",
             "神奇生物亲和",
         ]
+        assert state["current_context"]["current_date"] == "1991-09-01"
         assert state["current_context"]["location_id"] == "hogwarts_great_hall"
         assert state["current_context"]["activity"] == "sorting_ceremony"
 

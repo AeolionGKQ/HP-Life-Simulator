@@ -1,8 +1,13 @@
 from backend.app.content.eras import ERAS
+from backend.app.content.origins import ORIGIN_DEFINITIONS
 from backend.app.schemas.game import SetupOption, SetupStep
 
 
+# 兼容曾经使用过的单一起点值；新角色创建只展示下面四个预设节点。
+FIXED_STARTING_POINT_ID = "owl_letter_arrival"
+
 STARTING_POINT_IDS = {
+    FIXED_STARTING_POINT_ID,
     "before_first_letter",
     "diagon_alley",
     "platform_nine_three_quarters",
@@ -99,20 +104,12 @@ SETUP_STEPS = [
         description="血统会影响童年环境和部分巫师的初始态度，但不会决定你的能力与选择。",
         options=[
             option(
-                "pure_blood",
-                "纯血家族",
-                "父母双方都是巫师。你从小熟悉会动的照片、猫头鹰邮递和魔法社会礼仪，也可能背负古老家族的声誉与偏见。",
-            ),
-            option(
-                "half_blood",
-                "混血家庭",
-                "家庭同时连接魔法界与麻瓜世界。你对两边都不完全陌生，也常常要在两套生活方式之间寻找自己的位置。",
-            ),
-            option(
-                "muggle_born",
-                "麻瓜出身",
-                "父母都是麻瓜。魔法曾以无法解释的意外出现在童年里，而霍格沃茨来信将第一次为这些怪事给出答案。",
-            ),
+                origin_id,
+                definition["label"],
+                definition["setup_description"],
+                value=origin_id,
+            )
+            for origin_id, definition in ORIGIN_DEFINITIONS.items()
         ],
     ),
     SetupStep(
@@ -264,10 +261,30 @@ SETUP_STEPS = [
         title="剧情起点",
         description="从已经编排好的剧情节点中选择故事真正开始的时刻。越晚的起点会略过此前流程，但不会抹去角色背景。",
         options=[
-            option("before_first_letter", "收到霍格沃茨来信之前", "从魔法尚未得到解释的普通早晨开始。", value="before_first_letter"),
-            option("diagon_alley", "第一次踏入对角巷", "从采购魔杖、长袍、课本和坩埚开始。", value="diagon_alley"),
-            option("platform_nine_three_quarters", "九又四分之三站台", "从蒸汽、猫头鹰叫声和即将启程的列车开始。", value="platform_nine_three_quarters"),
-            option("sorting_ceremony", "分院时", "直接从礼堂的烛光、四张长桌和分院帽落到头顶的那一刻开始。", value="sorting_ceremony"),
+            option(
+                "before_first_letter",
+                "收到霍格沃茨来信之前",
+                "从 1991 年 7 月 1 日窗台、翅膀声和那封改变人生的霍格沃茨来信开始。",
+                value="before_first_letter",
+            ),
+            option(
+                "diagon_alley",
+                "第一次踏入对角巷",
+                "从采购魔杖、长袍、课本和坩埚开始。",
+                value="diagon_alley",
+            ),
+            option(
+                "platform_nine_three_quarters",
+                "九又四分之三站台",
+                "从 1991 年 9 月 1 日的蒸汽、猫头鹰叫声和即将启程的列车开始。",
+                value="platform_nine_three_quarters",
+            ),
+            option(
+                "sorting_ceremony",
+                "分院时",
+                "从礼堂烛光、长桌和分院帽落到头顶的那一刻开始。",
+                value="sorting_ceremony",
+            ),
         ],
         selection_mode="single",
     ),
@@ -322,7 +339,7 @@ SETUP_STEPS = [
     SetupStep(
         step=18,
         title="最终确认",
-        description="烛火掠过命运卷宗的最后一页。请检查完整角色设定；确认后将生成初始状态与好友关系，并从选定起点开启故事。",
+        description="烛火掠过命运卷宗的最后一页。请检查完整角色设定；确认后将生成初始状态与好友关系，并从你选择的剧情起点开启故事。",
         options=[option("confirm", "确认并开始", "角色创建完成后仍可在剧情中成长和改变。")],
         selection_mode="confirm",
     ),

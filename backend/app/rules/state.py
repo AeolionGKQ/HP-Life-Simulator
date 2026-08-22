@@ -116,6 +116,7 @@ def apply_turn_rules(
     if response.turn.location_id != state.get("current_context", {}).get("location_id"):
         changes["location_id"] = response.turn.location_id
     _update_age(next_state, _parse_datetime(context.get("datetime")), changes)
+    _apply_story_milestone_events(next_state, response.events, changes)
     _apply_school_exam_events(next_state, response.events, changes)
     _apply_grade_transition(next_state, response, current_date, changes)
 
@@ -166,6 +167,71 @@ def _parse_date(value: Any, fallback: date) -> date:
         except ValueError:
             pass
     return fallback
+
+
+def _apply_story_milestone_events(
+    state: dict[str, Any],
+    events: list[dict[str, Any]],
+    changes: dict[str, Any],
+) -> None:
+    """应用魔杖获得与分院完成这类一次性剧情里程碑。"""
+    school = state.setdefault("school", {})
+    wand = state.get("wand")
+    milestones = state.get("story_milestones")
+    if not isinstance(milestones, dict):
+        milestones = {}
+        state["story_milestones"] = milestones
+    applied: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
+
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        event_type = event.get("type") or event.get("event_type")
+        evidence = str(event.get("evidence") or "").strip()
+        if event_type == "wand_obtained":
+            if not isinstance(wand, dict) or not wand.get("description"):
+                rejected.append({
+                    "type": event_type,
+                    "reason": "wand_configuration_missing",
+                })
+                continue
+            if not evidence:
+                rejected.append({
+                    "type": event_type,
+                    "reason": "evidence_required",
+                })
+                continue
+            if milestones.get("wand_obtained") is True:
+                continue
+            wand["obtained"] = True
+            wand["status"] = "obtained"
+            milestones["wand_obtained"] = True
+            applied.append({"type": event_type, "evidence": evidence})
+        elif event_type == "sorting_completed":
+            if school.get("house") not in HOUSE_IDS:
+                rejected.append({
+                    "type": event_type,
+                    "reason": "house_required",
+                })
+                continue
+            if not evidence:
+                rejected.append({
+                    "type": event_type,
+                    "reason": "evidence_required",
+                })
+                continue
+            if milestones.get("sorting_completed") is True:
+                continue
+            school["sorting_completed"] = True
+            milestones["sorting_completed"] = True
+            applied.append({"type": event_type, "evidence": evidence})
+
+    if applied or rejected:
+        changes["story_milestones"] = {
+            "applied": applied,
+            "rejected": rejected,
+        }
 
 
 def _period(hour: int) -> str:
@@ -305,6 +371,10 @@ def _apply_grade_transition(
     school["grade"] = requested_grade
     if transition.type == "enrollment":
         school["enrollment_started"] = True
+        school["sorting_completed"] = True
+        milestones = state.setdefault("story_milestones", {})
+        if isinstance(milestones, dict):
+            milestones["sorting_completed"] = True
         school["departure_reason"] = None
         school["grade_started_year"] = current_date.year
         school["last_grade_promotion_key"] = None

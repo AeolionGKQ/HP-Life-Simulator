@@ -42,9 +42,9 @@ const setupView = {
     description: "血统不会决定你的选择，但它会改变世界最初看待你的方式。",
     selection_mode: "single",
     options: [
-      { id: "pure", label: "古老纯血家族", description: "姓氏被写在多本家谱中。", value: "pure_blood", category: "魔法家庭", appendable: false, available: true },
-      { id: "half", label: "混血家庭", description: "同时理解魔法与麻瓜世界。", value: "half_blood", category: "魔法家庭", appendable: false, available: true },
-      { id: "muggle", label: "麻瓜家庭", description: "猫头鹰带来了第一个不可思议的秘密。", value: "muggle_born", category: "非魔法家庭", appendable: false, available: true },
+      { id: "pure_blood", label: "纯血家族", description: "父母双方都是巫师。你从小熟悉会动的照片、猫头鹰邮递和魔法社会礼仪，也可能背负古老家族的声誉与偏见。", value: "pure_blood", category: "", appendable: false, available: true },
+      { id: "half_blood", label: "混血家庭", description: "家庭同时连接魔法界与麻瓜世界。你对两边都不完全陌生，也常常要在两套生活方式之间寻找自己的位置。", value: "half_blood", category: "", appendable: false, available: true },
+      { id: "muggle_born", label: "麻瓜出身", description: "父母都是麻瓜。魔法曾以无法解释的意外出现在童年里，而霍格沃茨来信将第一次为这些怪事给出答案。", value: "muggle_born", category: "", appendable: false, available: true },
       { id: "hidden", label: "被隐去的身世", description: "一段暂时无法读取的家族记录。", value: "hidden", category: "特殊身世", appendable: false, available: false },
     ],
   },
@@ -61,16 +61,20 @@ const setupView = {
 const startingPointSetupView = {
   ...setupView,
   current_step: 14,
+  answers: {
+    ...setupView.answers,
+    "6": "火龙化成人",
+  },
   current: {
     step: 14,
     title: "剧情起点",
     description: "从已经编排好的剧情节点中选择故事真正开始的时刻。",
     selection_mode: "single" as const,
     options: [
-      { id: "before_first_letter", label: "收到霍格沃茨来信之前", description: "从魔法尚未得到解释的普通早晨开始。", value: "before_first_letter", category: "", appendable: false, available: true },
+      { id: "before_first_letter", label: "收到霍格沃茨来信之前", description: "从 1991 年 7 月 1 日窗台、翅膀声和那封改变人生的霍格沃茨来信开始。", value: "before_first_letter", category: "", appendable: false, available: true },
       { id: "diagon_alley", label: "第一次踏入对角巷", description: "从采购魔杖、长袍、课本和坩埚开始。", value: "diagon_alley", category: "", appendable: false, available: true },
-      { id: "platform_nine_three_quarters", label: "九又四分之三站台", description: "从蒸汽、猫头鹰叫声和即将启程的列车开始。", value: "platform_nine_three_quarters", category: "", appendable: false, available: true },
-      { id: "sorting_ceremony", label: "分院时", description: "直接从礼堂的烛光、四张长桌和分院帽落到头顶的那一刻开始。", value: "sorting_ceremony", category: "", appendable: false, available: true },
+      { id: "platform_nine_three_quarters", label: "九又四分之三站台", description: "从 1991 年 9 月 1 日的蒸汽、猫头鹰叫声和即将启程的列车开始。", value: "platform_nine_three_quarters", category: "", appendable: false, available: true },
+      { id: "sorting_ceremony", label: "分院时", description: "从礼堂烛光、长桌和分院帽落到头顶的那一刻开始。", value: "sorting_ceremony", category: "", appendable: false, available: true },
     ],
   },
 };
@@ -507,6 +511,9 @@ for (const viewport of viewports) {
       await expect(page.locator(".save-card")).toHaveCSS("cursor", "auto");
       await page.getByRole("button", { name: `打开存档：${setupSession.name}` }).click();
       await expect(page.getByRole("heading", { name: setupView.current.title })).toBeVisible();
+      await expect(page.getByText("父母双方都是巫师。你从小熟悉会动的照片、猫头鹰邮递和魔法社会礼仪，也可能背负古老家族的声誉与偏见。")).toBeVisible();
+      await expect(page.getByText("家庭同时连接魔法界与麻瓜世界。你对两边都不完全陌生，也常常要在两套生活方式之间寻找自己的位置。")).toBeVisible();
+      await expect(page.getByText("父母都是麻瓜。魔法曾以无法解释的意外出现在童年里，而霍格沃茨来信将第一次为这些怪事给出答案。")).toBeVisible();
       if (viewport.name === "mobile") await assertMinimumTouchTargets(page);
       await assertNoHorizontalOverflow(page);
       await page.screenshot({ path: `test-results/visual-review/${viewport.name}-setup.png` });
@@ -537,6 +544,7 @@ for (const viewport of viewports) {
       await expect(page.getByRole("button", { name: "第一次踏入对角巷" })).toBeVisible();
       await expect(page.getByRole("button", { name: "九又四分之三站台" })).toBeVisible();
       await expect(page.getByRole("button", { name: "分院时" })).toBeVisible();
+      await expect(page.locator(".setup-option")).toHaveCount(4);
       await expect(page.getByRole("textbox", { name: "剧情起点" })).toHaveCount(0);
       if (viewport.name === "mobile") await assertMinimumTouchTargets(page);
       await assertNoHorizontalOverflow(page);

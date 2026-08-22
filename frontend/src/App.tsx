@@ -828,6 +828,7 @@ function formatEraAnswer(answer: unknown, eras: EraInfo[]): string {
 }
 
 const STARTING_POINT_LABELS: Record<string, string> = {
+  owl_letter_arrival: "收到霍格沃茨来信之前",
   before_first_letter: "收到霍格沃茨来信之前",
   before_letter: "收到霍格沃茨来信之前",
   diagon_alley: "第一次踏入对角巷",

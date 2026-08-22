@@ -21,6 +21,7 @@ def _response(
     grade: str | None = None,
     transition: dict | None = None,
     player_changes: dict | None = None,
+    events: list[dict] | None = None,
 ) -> NarrativeResponse:
     return NarrativeResponse.model_validate(
         {
@@ -35,6 +36,7 @@ def _response(
             },
             "choices": [],
             "player_changes": player_changes or {},
+            "events": events or [],
             "worldline": {"offset_rate": 0},
         }
     )
@@ -82,6 +84,7 @@ def test_enrollment_creates_first_year_courses_and_zero_level_skills() -> None:
     state = _enrolled_state()
     state["school"]["grade"] = "not_enrolled"
     state["school"]["enrollment_started"] = False
+    state["school"]["sorting_completed"] = False
     state["school"]["active_courses"] = []
     state["skills"] = {}
     next_state, changes = apply_turn_rules(
@@ -97,6 +100,10 @@ def test_enrollment_creates_first_year_courses_and_zero_level_skills() -> None:
                 "reason": "sorting_completed",
                 "evidence": "分院仪式完成",
             },
+            events=[{
+                "type": "sorting_completed",
+                "evidence": "分院仪式完成",
+            }],
         ),
     )
     assert next_state["school"]["active_courses"] == list(FIRST_YEAR_REQUIRED_COURSE_IDS)
@@ -105,6 +112,51 @@ def test_enrollment_creates_first_year_courses_and_zero_level_skills() -> None:
         for course_id in FIRST_YEAR_REQUIRED_COURSE_IDS
     )
     assert "school_grade" in changes
+
+
+def test_story_milestone_events_unlock_wand_and_sorting_state() -> None:
+    state = _enrolled_state()
+    state["school"]["grade"] = "not_enrolled"
+    state["school"]["enrollment_started"] = False
+    state["school"]["sorting_completed"] = False
+    state["wand"] = {
+        "description": "冬青木，独角兽毛",
+        "obtained": False,
+        "status": "not_obtained",
+    }
+    state["story_milestones"] = {
+        "wand_obtained": False,
+        "sorting_completed": False,
+    }
+    next_state, changes = apply_turn_rules(
+        state,
+        [],
+        _response(
+            "1991-07-10",
+            events=[
+                {
+                    "type": "wand_obtained",
+                    "evidence": "奥利凡德完成试杖后，角色正式获得这根魔杖。",
+                },
+                {
+                    "type": "sorting_completed",
+                    "evidence": "分院帽完成分院并宣布学院归属。",
+                },
+            ],
+        ),
+    )
+
+    assert next_state["wand"]["obtained"] is True
+    assert next_state["wand"]["status"] == "obtained"
+    assert next_state["school"]["sorting_completed"] is True
+    assert next_state["story_milestones"] == {
+        "wand_obtained": True,
+        "sorting_completed": True,
+    }
+    assert [item["type"] for item in changes["story_milestones"]["applied"]] == [
+        "wand_obtained",
+        "sorting_completed",
+    ]
 
 
 def test_june_progression_is_idempotent_and_does_not_change_grade() -> None:
