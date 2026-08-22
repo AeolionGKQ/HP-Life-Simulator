@@ -208,6 +208,15 @@ const turnResponse = {
   memory_update: { summary: "在图书馆发现会写下自己名字的无名旧书。" },
 };
 
+const generatedTurnResponse = {
+  ...turnResponse,
+  turn: {
+    ...turnResponse.turn,
+    title: "森林边缘的回响",
+    narrative: "生成完成后的新剧情节点。",
+  },
+};
+
 const previousTurnResponse = {
   ...turnResponse,
   turn: {
@@ -322,14 +331,16 @@ const expelledPlayerState = {
   },
 };
 
-type Scenario = "landing" | "setup" | "setup-birthday" | "setup-confirm" | "setup-starting-point" | "setup-friends" | "story" | "expulsion";
+type Scenario = "landing" | "setup" | "setup-birthday" | "setup-confirm" | "setup-starting-point" | "setup-friends" | "story" | "story-switching" | "expulsion";
 
 async function installApi(page: Page, scenario: Scenario) {
   const sessions = scenario === "setup" || scenario === "setup-birthday" || scenario === "setup-confirm" || scenario === "setup-starting-point" || scenario === "setup-friends"
     ? [setupSession]
-    : scenario === "story" || scenario === "expulsion"
+    : scenario === "story" || scenario === "story-switching" || scenario === "expulsion"
       ? [activeSession]
       : [];
+  let actionCompleted = false;
+  let actionAddsTurn = false;
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -350,7 +361,7 @@ async function installApi(page: Page, scenario: Scenario) {
       "/api/sessions/session-active/setup": completedSetup,
       "/api/sessions/session-active/state": {
         session_id: "session-active",
-        state_version: scenario === "expulsion" ? 8 : 7,
+        state_version: scenario === "expulsion" || actionCompleted ? 8 : 7,
         state: scenario === "expulsion" ? expelledPlayerState : playerState,
       },
       "/api/sessions/session-active/courses": {
@@ -387,10 +398,16 @@ async function installApi(page: Page, scenario: Scenario) {
         },
       }],
       "/api/sessions/session-active/npcs": [{ npc_id: "luna_lovegood", is_original_character: false, state: { name: "卢娜·洛夫古德" } }],
-      "/api/sessions/session-active/turns": [
-        { id: "turn-6", sequence: 6, action: { kind: "choice" }, narrative: previousTurnResponse.turn.narrative, response: previousTurnResponse, state_version_after: 6, created_at: "1991-09-02T00:18:00Z" },
-        { id: "turn-7", sequence: 7, action: { kind: "choice" }, narrative: turnResponse.turn.narrative, response: turnResponse, state_version_after: 7, created_at: "1991-09-03T00:18:00Z" },
-      ],
+      "/api/sessions/session-active/turns": actionCompleted && actionAddsTurn
+        ? [
+          { id: "turn-6", sequence: 6, action: { kind: "choice" }, narrative: previousTurnResponse.turn.narrative, response: previousTurnResponse, state_version_after: 6, created_at: "1991-09-02T00:18:00Z" },
+          { id: "turn-7", sequence: 7, action: { kind: "choice" }, narrative: turnResponse.turn.narrative, response: turnResponse, state_version_after: 7, created_at: "1991-09-03T00:18:00Z" },
+          { id: "turn-8", sequence: 8, action: { kind: "choice" }, narrative: generatedTurnResponse.turn.narrative, response: generatedTurnResponse, state_version_after: 8, created_at: "1991-09-03T00:30:00Z" },
+        ]
+        : [
+          { id: "turn-6", sequence: 6, action: { kind: "choice" }, narrative: previousTurnResponse.turn.narrative, response: previousTurnResponse, state_version_after: 6, created_at: "1991-09-02T00:18:00Z" },
+          { id: "turn-7", sequence: 7, action: { kind: "choice" }, narrative: turnResponse.turn.narrative, response: turnResponse, state_version_after: 7, created_at: "1991-09-03T00:18:00Z" },
+        ],
     };
     if (path === "/api/sessions/session-active/departure-notice/acknowledge") {
       await route.fulfill({
@@ -429,7 +446,10 @@ async function installApi(page: Page, scenario: Scenario) {
     }
     const body = bodies[path];
     if (path === "/api/sessions/session-active/actions") {
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      await new Promise((resolve) => setTimeout(resolve, scenario === "story-switching" ? 2000 : 800));
+      const requestBody = request.postDataJSON() as { kind?: string };
+      actionCompleted = true;
+      actionAddsTurn = requestBody.kind !== "reshape_fate";
       await route.fulfill({
         status: 200,
         json: {
@@ -437,7 +457,7 @@ async function installApi(page: Page, scenario: Scenario) {
           sequence: 8,
           state_version: 8,
           recalled_memory_ids: [],
-          response: turnResponse,
+          response: actionAddsTurn ? generatedTurnResponse : turnResponse,
         },
       });
       return;
@@ -672,6 +692,22 @@ for (const viewport of viewports) {
       await page.getByRole("button", { name: "角色" }).click();
       await expect(page.getByText("古老书签", { exact: true })).toBeVisible();
       await expect(page.getByText("sealed_box", { exact: true })).toHaveCount(2);
+    });
+
+    test("restores in-flight story generation after switching saves", async ({ page }) => {
+      await installApi(page, "story-switching");
+      await page.goto("/");
+      await page.getByRole("button", { name: `打开存档：${activeSession.name}` }).click();
+
+      await page.getByRole("button", { name: "举起魔杖，走近那本自行书写的旧书" }).click();
+      await expect(page.getByRole("status")).toContainText("羽毛笔正在书写命运");
+
+      await page.getByRole("button", { name: "创建新存档" }).click();
+      await expect(page.getByRole("heading", { name: "从档案柜中取出一卷羊皮纸" })).toBeVisible();
+      await page.getByRole("button", { name: `打开存档：${activeSession.name}` }).click();
+
+      await expect(page.getByRole("status")).toContainText("羽毛笔正在书写命运");
+      await expect(page.getByRole("heading", { name: "森林边缘的回响" })).toBeVisible();
     });
 
     test("formats fractional state changes without floating point noise", async ({ page }) => {

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { BookOpenText, MagicWand, Sparkle } from "@phosphor-icons/react";
 import {
   api,
+  getPendingAction,
   type JournalEntry,
   type CourseView,
   type NPCState,
@@ -94,15 +95,41 @@ export function GameView({
   }
 
   useEffect(() => {
+    let active = true;
+    const pendingAction = getPendingAction(sessionId);
     setFateInterventionOpen(false);
     setFateInstruction("");
     setFateIntervening(false);
     setReshapeOpen(false);
     setReshapeInstruction("");
     setReshaping(false);
+    setLoading(Boolean(pendingAction));
     void refreshState().catch((reason: unknown) => {
-      setError(reason instanceof Error ? reason.message : "无法读取游戏状态");
+      if (active) setError(reason instanceof Error ? reason.message : "无法读取游戏状态");
     });
+    if (pendingAction) {
+      void pendingAction.then(
+        async () => {
+          if (!active) return;
+          try {
+            await refreshState();
+          } catch (reason: unknown) {
+            if (active) setError(reason instanceof Error ? reason.message : "无法读取最新剧情");
+          } finally {
+            if (active) setLoading(false);
+          }
+        },
+        (reason: unknown) => {
+          if (active) {
+            setError(reason instanceof Error ? reason.message : "剧情生成失败");
+            setLoading(false);
+          }
+        },
+      );
+    }
+    return () => {
+      active = false;
+    };
   }, [sessionId]);
 
   async function submitAction(

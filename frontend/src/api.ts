@@ -281,6 +281,31 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+const pendingActions = new Map<string, Promise<TurnResult>>();
+
+export function getPendingAction(sessionId: string): Promise<TurnResult> | undefined {
+  return pendingActions.get(sessionId);
+}
+
+function trackPendingAction(
+  sessionId: string,
+  requestPromise: Promise<TurnResult>,
+): Promise<TurnResult> {
+  let trackedPromise: Promise<TurnResult>;
+  trackedPromise = requestPromise.then(
+    (result) => {
+      if (pendingActions.get(sessionId) === trackedPromise) pendingActions.delete(sessionId);
+      return result;
+    },
+    (reason) => {
+      if (pendingActions.get(sessionId) === trackedPromise) pendingActions.delete(sessionId);
+      throw reason;
+    },
+  );
+  pendingActions.set(sessionId, trackedPromise);
+  return trackedPromise;
+}
+
 export const api = {
   health: () => request<HealthResponse>("/api/health"),
   llmConfig: () => request<LLMConfigStatus>("/api/config/llm"),
@@ -356,10 +381,12 @@ export const api = {
     fate_instruction?: string;
     reshape_instruction?: string;
     },
-  ) =>
+  ) => trackPendingAction(
+    id,
     request<TurnResult>(`/api/sessions/${id}/actions`, {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  ),
 };
 
