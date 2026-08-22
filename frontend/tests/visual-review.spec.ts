@@ -58,6 +58,18 @@ const setupView = {
   },
 };
 
+const birthdaySetupView = {
+  ...setupView,
+  current_step: 4,
+  current: {
+    step: 4,
+    title: "生日",
+    description: "请以 YYYY-MM-DD 格式写下生日。",
+    selection_mode: "text" as const,
+    options: [],
+  },
+};
+
 const startingPointSetupView = {
   ...setupView,
   current_step: 14,
@@ -304,10 +316,10 @@ const expelledPlayerState = {
   },
 };
 
-type Scenario = "landing" | "setup" | "setup-confirm" | "setup-starting-point" | "setup-friends" | "story" | "expulsion";
+type Scenario = "landing" | "setup" | "setup-birthday" | "setup-confirm" | "setup-starting-point" | "setup-friends" | "story" | "expulsion";
 
 async function installApi(page: Page, scenario: Scenario) {
-  const sessions = scenario === "setup" || scenario === "setup-confirm" || scenario === "setup-starting-point" || scenario === "setup-friends"
+  const sessions = scenario === "setup" || scenario === "setup-birthday" || scenario === "setup-confirm" || scenario === "setup-starting-point" || scenario === "setup-friends"
     ? [setupSession]
     : scenario === "story" || scenario === "expulsion"
       ? [activeSession]
@@ -320,7 +332,9 @@ async function installApi(page: Page, scenario: Scenario) {
       "/api/config/llm": { configured: true, base_url: "https://example.invalid", model: "arcane-narrator", api_key_present: true },
       "/api/sessions": sessions,
       "/api/content/eras": [era],
-      "/api/sessions/session-setup/setup": scenario === "setup-confirm"
+      "/api/sessions/session-setup/setup": scenario === "setup-birthday"
+        ? birthdaySetupView
+        : scenario === "setup-confirm"
         ? finalSetupView
         : scenario === "setup-starting-point"
           ? startingPointSetupView
@@ -556,6 +570,17 @@ for (const viewport of viewports) {
       if (viewport.name === "mobile") await assertMinimumTouchTargets(page);
       await assertNoHorizontalOverflow(page);
       await page.screenshot({ path: `test-results/visual-review/${viewport.name}-setup.png` });
+    });
+
+    test("uses a native date input for the birthday", async ({ page }) => {
+      await installApi(page, "setup-birthday");
+      await page.goto("/");
+      await page.getByRole("button", { name: `打开存档：${setupSession.name}` }).click();
+
+      const birthdayInput = page.locator('input[type="date"][aria-label="生日"]');
+      await expect(birthdayInput).toBeVisible();
+      await expect(birthdayInput).toHaveValue("1980-03-12");
+      await expect(birthdayInput).toHaveAttribute("autocomplete", "bday");
     });
 
     test("opens the new-save flow from the save manager", async ({ page }) => {

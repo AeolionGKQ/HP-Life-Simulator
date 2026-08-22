@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from datetime import date
 from hashlib import sha1
@@ -21,6 +22,7 @@ from backend.app.schemas.game import SetupAnswer, SetupView
 
 
 SETUP_FINAL_STEP = 18
+BIRTHDAY_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
 def get_setup_view(game_session: GameSession, player_state: PlayerState) -> SetupView:
@@ -58,8 +60,11 @@ def save_setup_answer(
             raise ValueError("当前版本尚未开放所选世代")
         game_session.era_id = selected_era
     if payload.step == 4:
+        birthday = str(payload.answer).strip()
+        if BIRTHDAY_PATTERN.fullmatch(birthday) is None:
+            raise ValueError("请选择有效的生日日期")
         try:
-            date.fromisoformat(str(payload.answer).strip())
+            date.fromisoformat(birthday)
         except ValueError as exc:
             raise ValueError("请选择有效的生日日期") from exc
     if payload.step == 15 and str(payload.answer) not in {

@@ -585,11 +585,8 @@ export function App() {
                       setup.current_step === 4 ? (
                         <input
                           aria-label="生日"
-                          inputMode="numeric"
-                          maxLength={10}
-                          pattern="\d{4}-\d{2}-\d{2}"
-                          placeholder="YYYY-MM-DD"
-                          type="text"
+                          autoComplete="bday"
+                          type="date"
                           value={setupAnswer}
                           onChange={(event) => setSetupAnswer(event.target.value)}
                         />

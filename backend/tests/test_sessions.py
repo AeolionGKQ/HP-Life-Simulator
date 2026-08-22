@@ -331,12 +331,18 @@ def test_setup_requires_current_step() -> None:
             f"/api/sessions/{session_id}/setup/answer",
             json={"step": 3, "answer": "女"},
         )
-        invalid_birthday = client.post(
-            f"/api/sessions/{session_id}/setup/answer",
-            json={"step": 4, "answer": "三月十二日"},
-        )
-        assert invalid_birthday.status_code == 409
-        assert invalid_birthday.json()["detail"] == "请选择有效的生日日期"
+        for invalid_value in (
+            "三月十二日",
+            "19800312",
+            "1980/03/12",
+            "1980-02-30",
+        ):
+            invalid_birthday = client.post(
+                f"/api/sessions/{session_id}/setup/answer",
+                json={"step": 4, "answer": invalid_value},
+            )
+            assert invalid_birthday.status_code == 409
+            assert invalid_birthday.json()["detail"] == "请选择有效的生日日期"
 
 
 def test_setup_academy_only_accepts_four_choices() -> None:
