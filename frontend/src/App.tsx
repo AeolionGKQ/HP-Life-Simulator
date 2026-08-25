@@ -225,6 +225,20 @@ export function App() {
     }
   }
 
+  async function navigateSetupBack() {
+    if (!selectedSessionId || !setup || setup.current_step <= 1) return;
+    setSetupLoading(true);
+    setError("");
+    try {
+      const next = await api.navigateSetup(selectedSessionId, setup.current_step - 1);
+      setSetup(next);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "返回上一步失败");
+    } finally {
+      setSetupLoading(false);
+    }
+  }
+
   async function confirmSetup() {
     if (!selectedSessionId) return;
     setSetupLoading(true);
@@ -579,6 +593,15 @@ export function App() {
                 </div>
               )}
               <div className="setup-input-row">
+                {setup.current_step > 1 && (
+                  <button
+                    className="secondary-button"
+                    disabled={setupLoading}
+                    onClick={() => void navigateSetupBack()}
+                  >
+                    上一步
+                  </button>
+                )}
                 {setup.current.selection_mode !== "confirm" ? (
                   <>
                     {setup.current_step !== 1 && setup.current_step !== 14 && setup.current_step !== 15 && (

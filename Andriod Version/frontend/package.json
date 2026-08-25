@@ -1,0 +1,31 @@
+{
+  "name": "hp-simulator-frontend",
+  "private": true,
+  "version": "2.5.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "test": "playwright test tests/ui-contract.spec.ts tests/visual-review.spec.ts",
+    "test:e2e": "playwright test tests/ui-contract.spec.ts tests/visual-review.spec.ts",
+    "test:e2e:real": "playwright test tests/real-backend.spec.ts"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/core": "^8.5.0",
+    "@phosphor-icons/react": "^2.1.10",
+    "@vitejs/plugin-react": "^4.3.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.11"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.0",
+    "@playwright/test": "^1.54.2",
+    "@types/react": "^19.0.8",
+    "@types/react-dom": "^19.0.3",
+    "jsdom": "^25.0.1",
+    "vitest": "^2.1.8"
+  }
+}

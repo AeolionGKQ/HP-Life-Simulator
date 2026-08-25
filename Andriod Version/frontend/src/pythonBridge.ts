@@ -1,0 +1,40 @@
+import { Capacitor, registerPlugin } from "@capacitor/core";
+
+interface PythonProbeResult {
+  status: string;
+  message: string;
+  pythonVersion: string;
+  filesDir: string;
+}
+
+interface PythonBridgePlugin {
+  probe(): Promise<PythonProbeResult>;
+  request(payload: {
+    path: string;
+    method: string;
+    body: string;
+  }): Promise<{ payload: string }>;
+}
+
+const PythonBridge = registerPlugin<PythonBridgePlugin>("PythonBridge");
+
+export function isAndroidNative(): boolean {
+  return Capacitor.getPlatform() === "android";
+}
+
+export async function probePython(): Promise<PythonProbeResult> {
+  return PythonBridge.probe();
+}
+
+export async function requestPython<T>(
+  path: string,
+  method = "GET",
+  body?: string,
+): Promise<T> {
+  const response = await PythonBridge.request({
+    path,
+    method,
+    body: body ?? "",
+  });
+  return JSON.parse(response.payload) as T;
+}

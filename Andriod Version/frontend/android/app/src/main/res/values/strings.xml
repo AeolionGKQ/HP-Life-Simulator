@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Hogwarts Life Simulator</string>
+    <string name="title_activity_main">Hogwarts Life Simulator</string>
+    <string name="package_name">com.hpsimulator.app</string>
+    <string name="custom_url_scheme">com.hpsimulator.app</string>
+</resources>

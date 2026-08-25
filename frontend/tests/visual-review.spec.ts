@@ -58,6 +58,19 @@ const setupView = {
   },
 };
 
+const previousSetupView = {
+  ...setupView,
+  current_step: 5,
+  current: {
+    ...setupView.current,
+    step: 5,
+    title: "外貌与体格",
+    description: "写下角色外貌与体格特征。",
+    selection_mode: "text" as const,
+    options: [],
+  },
+};
+
 const birthdaySetupView = {
   ...setupView,
   current_step: 4,
@@ -334,16 +347,26 @@ const expelledPlayerState = {
   },
 };
 
-type Scenario = "landing" | "setup" | "setup-birthday" | "setup-confirm" | "setup-starting-point" | "setup-friends" | "story" | "story-switching" | "story-writing" | "expulsion";
+type Scenario = "landing" | "setup" | "setup-birthday" | "setup-confirm" | "setup-starting-point" | "setup-friends" | "story" | "story-initial" | "story-switching" | "story-writing" | "expulsion";
 
 async function installApi(page: Page, scenario: Scenario) {
   const sessions = scenario === "setup" || scenario === "setup-birthday" || scenario === "setup-confirm" || scenario === "setup-starting-point" || scenario === "setup-friends"
     ? [setupSession]
-    : scenario === "story" || scenario === "story-switching" || scenario === "story-writing" || scenario === "expulsion"
+    : scenario === "story" || scenario === "story-initial" || scenario === "story-switching" || scenario === "story-writing" || scenario === "expulsion"
       ? [activeSession]
       : [];
   let actionCompleted = false;
   let actionAddsTurn = false;
+  let attributeRegenerated = false;
+  const initialStoryPlayerState = {
+    ...playerState,
+    current_context: {
+      ...playerState.current_context,
+      current_date: "1991-09-01",
+      location_id: "home",
+      location_name: "家中",
+    },
+  };
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -365,7 +388,23 @@ async function installApi(page: Page, scenario: Scenario) {
       "/api/sessions/session-active/state": {
         session_id: "session-active",
         state_version: scenario === "expulsion" || actionCompleted ? 8 : 7,
-        state: scenario === "expulsion" ? expelledPlayerState : playerState,
+        state: scenario === "expulsion"
+          ? expelledPlayerState
+          : attributeRegenerated
+            ? {
+              ...initialStoryPlayerState,
+              attribute_initialization: {
+                ...initialStoryPlayerState.attribute_initialization,
+                calibration_summary: "按偏好重新生成",
+              },
+              dimensions: {
+                ...initialStoryPlayerState.dimensions,
+                constitution: { value: 14, max: 20 },
+              },
+            }
+            : scenario === "story-initial"
+              ? initialStoryPlayerState
+              : playerState,
       },
       "/api/sessions/session-active/courses": {
         session_id: "session-active",
@@ -387,7 +426,9 @@ async function installApi(page: Page, scenario: Scenario) {
         course_selection: null,
         course_history: [],
       },
-      "/api/sessions/session-active/journal": [{ id: "journal-1", turn_id: "turn-7", entry_type: "story", title: "午夜后的图书馆", summary: "无名旧书写下了你的名字。", data: { sequence: 7 }, created_at: "1991-09-03T00:18:00Z" }],
+      "/api/sessions/session-active/journal": scenario === "story-initial"
+        ? []
+        : [{ id: "journal-1", turn_id: "turn-7", entry_type: "story", title: "午夜后的图书馆", summary: "无名旧书写下了你的名字。", data: { sequence: 7 }, created_at: "1991-09-03T00:18:00Z" }],
       "/api/sessions/session-active/relationships": [{
         source_id: "player",
         target_id: "luna_lovegood",
@@ -401,7 +442,9 @@ async function installApi(page: Page, scenario: Scenario) {
         },
       }],
       "/api/sessions/session-active/npcs": [{ npc_id: "luna_lovegood", is_original_character: false, state: { name: "卢娜·洛夫古德" } }],
-      "/api/sessions/session-active/turns": actionCompleted && actionAddsTurn
+      "/api/sessions/session-active/turns": scenario === "story-initial"
+        ? []
+        : actionCompleted && actionAddsTurn
         ? [
           { id: "turn-6", sequence: 6, action: { kind: "choice" }, narrative: previousTurnResponse.turn.narrative, response: previousTurnResponse, state_version_after: 6, created_at: "1991-09-02T00:18:00Z" },
           { id: "turn-7", sequence: 7, action: { kind: "choice" }, narrative: turnResponse.turn.narrative, response: turnResponse, state_version_after: 7, created_at: "1991-09-03T00:18:00Z" },
@@ -438,6 +481,20 @@ async function installApi(page: Page, scenario: Scenario) {
         await route.fulfill({ status: 200, json: startingPointSetupView });
         return;
       }
+      if (requestBody.step === 5) {
+        await route.fulfill({ status: 200, json: setupView });
+        return;
+      }
+    }
+    if (path === "/api/sessions/session-setup/setup/navigate" && request.method() === "POST") {
+      await route.fulfill({ status: 200, json: previousSetupView });
+      return;
+    }
+    if (path === "/api/sessions/session-active/attributes/initialize" && request.method() === "POST") {
+      attributeRegenerated = true;
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      await route.fulfill({ status: 200, json: completedSetup });
+      return;
     }
     if (path === "/api/sessions/session-setup/setup/confirm") {
       await new Promise((resolve) => setTimeout(resolve, 450));
@@ -601,6 +658,23 @@ for (const viewport of viewports) {
       await page.screenshot({ path: `test-results/visual-review/${viewport.name}-setup.png` });
     });
 
+    test("navigates backward and forward through completed setup steps", async ({ page }) => {
+      await installApi(page, "setup");
+      await page.goto("/");
+      await page.getByRole("button", { name: `打开存档：${setupSession.name}` }).click();
+
+      await expect(page.getByRole("heading", { name: setupView.current.title })).toBeVisible();
+      await page.getByRole("button", { name: "上一步" }).click();
+      await expect(page.getByRole("heading", { name: previousSetupView.current.title })).toBeVisible();
+      const appearanceInput = page.getByRole("textbox", { name: previousSetupView.current.title });
+      await expect(appearanceInput).toHaveValue("黑发灰眼，身形清瘦");
+      await appearanceInput.fill("金发绿眼，身形高挑");
+      await page.getByRole("button", { name: "下一步" }).click();
+      await expect(page.getByRole("heading", { name: setupView.current.title })).toBeVisible();
+      if (viewport.name === "mobile") await assertMinimumTouchTargets(page);
+      await assertNoHorizontalOverflow(page);
+    });
+
     test("uses a native date input for the birthday", async ({ page }) => {
       await installApi(page, "setup-birthday");
       await page.goto("/");
@@ -695,6 +769,35 @@ for (const viewport of viewports) {
       await page.getByRole("button", { name: "角色" }).click();
       await expect(page.getByText("古老书签", { exact: true })).toBeVisible();
       await expect(page.getByText("sealed_box", { exact: true })).toHaveCount(2);
+    });
+
+    test("allows regenerating initial attributes before the story begins", async ({ page }) => {
+      await installApi(page, "story-initial");
+      await page.goto("/");
+      await page.getByRole("button", { name: `打开存档：${activeSession.name}` }).click();
+
+      await expect(page.getByRole("heading", { name: "角色属性已经校准" })).toBeVisible();
+      await page.getByRole("button", { name: "重新生成属性" }).click();
+      const adjustment = page.getByRole("textbox", { name: "属性调整说明" });
+      await expect(adjustment).toBeVisible();
+      await adjustment.fill("体质和意志稍高，魔力保持普通");
+
+      const requestPromise = page.waitForRequest(
+        (request) =>
+          request.url().includes("/api/sessions/session-active/attributes/initialize")
+          && request.method() === "POST",
+      );
+      await page.getByRole("button", { name: "确认重新生成" }).click();
+      const request = await requestPromise;
+      expect(request.postDataJSON()).toEqual({
+        adjustment_instruction: "体质和意志稍高，魔力保持普通",
+        force: true,
+      });
+      await expect(page.getByRole("button", { name: "踏入魔法世界" })).toBeDisabled();
+      await expect(page.getByText("按偏好重新生成")).toBeVisible();
+      await expect(page.getByRole("textbox", { name: "属性调整说明" })).toHaveCount(0);
+      if (viewport.name === "mobile") await assertMinimumTouchTargets(page);
+      await assertNoHorizontalOverflow(page);
     });
 
     test("restores in-flight story generation after switching saves", async ({ page }) => {

@@ -60,6 +60,9 @@ export function GameView({
   const [acknowledgingDeparture, setAcknowledgingDeparture] = useState(false);
   const [loading, setLoading] = useState(false);
   const [initializingAttributes, setInitializingAttributes] = useState(false);
+  const [attributeRegenerateOpen, setAttributeRegenerateOpen] = useState(false);
+  const [attributeAdjustment, setAttributeAdjustment] = useState("");
+  const [regeneratingAttributes, setRegeneratingAttributes] = useState(false);
   const [error, setError] = useState("");
 
   async function refreshState() {
@@ -470,7 +473,7 @@ export function GameView({
       setInitializingAttributes(true);
       setError("");
       try {
-        await api.initializeAttributes(sessionId);
+        await api.initializeAttributes(sessionId, "", true);
         await refreshState();
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : "初始属性生成失败");
@@ -496,6 +499,22 @@ export function GameView({
         </div>
       </section>
     );
+  }
+
+  async function regenerateAttributes() {
+    if (regeneratingAttributes || turnHistory.length > 0 || journal.length > 0) return;
+    setRegeneratingAttributes(true);
+    setError("");
+    try {
+      await api.initializeAttributes(sessionId, attributeAdjustment.trim(), true);
+      await refreshState();
+      setAttributeAdjustment("");
+      setAttributeRegenerateOpen(false);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "初始属性重新生成失败");
+    } finally {
+      setRegeneratingAttributes(false);
+    }
   }
 
   if (departureNoticePending) {
@@ -554,7 +573,34 @@ export function GameView({
               <p>{player.attribute_initialization?.calibration_summary || "你的初始资源与长期维度已经根据角色设定生成，并会在剧情中继续变化。"}</p>
               <ResourceSection resources={resources} />
               <DimensionSection dimensions={dimensions} />
-              <button className="primary-button" disabled={courseSelectionPending} onClick={() => void submitAction("choice", "start_story")}>
+              <div className="attribute-regenerate">
+                <button
+                  className="secondary-button"
+                  disabled={regeneratingAttributes || loading}
+                  onClick={() => setAttributeRegenerateOpen((current) => !current)}
+                >
+                  {attributeRegenerateOpen ? "收起调整说明" : "重新生成属性"}
+                </button>
+                {attributeRegenerateOpen && (
+                  <div className="attribute-regenerate-form">
+                    <textarea
+                      aria-label="属性调整说明"
+                      value={attributeAdjustment}
+                      onChange={(event) => setAttributeAdjustment(event.target.value)}
+                      placeholder="可选：告诉模型希望如何调整，例如“体质和意志稍高，魔力保持普通，不要让属性过于极端”。"
+                      maxLength={2000}
+                    />
+                    <button
+                      className="primary-button"
+                      disabled={regeneratingAttributes || loading}
+                      onClick={() => void regenerateAttributes()}
+                    >
+                      {regeneratingAttributes ? "正在重新生成…" : "确认重新生成"}
+                    </button>
+                  </div>
+                )}
+              </div>
+              <button className="primary-button" disabled={courseSelectionPending || regeneratingAttributes} onClick={() => void submitAction("choice", "start_story")}>
                 踏入魔法世界
               </button>
             </div>

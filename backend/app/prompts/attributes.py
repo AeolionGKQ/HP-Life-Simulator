@@ -50,6 +50,8 @@ ATTRIBUTE_INITIALIZATION_JSON_TEMPLATE_END"""
 def build_attribute_initialization_messages(
     game_session: GameSession,
     player_state: PlayerState,
+    *,
+    adjustment_instruction: str = "",
 ) -> list[dict[str, str]]:
     era = get_era(game_session.era_id)
     state = player_state.state
@@ -79,6 +81,7 @@ def build_attribute_initialization_messages(
             "setup_answers": setup.get("answers", {}),
         },
         "catalog": catalog_for_prompt(),
+        "adjustment_instruction": adjustment_instruction.strip(),
     }
     system = (
         "你是《霍格沃兹人生模拟器》的角色属性校准器。"
@@ -87,6 +90,8 @@ def build_attribute_initialization_messages(
         "不要生成任何剧情，不要生成选项，不要修改关系、世界线、技能、词条或物品。"
         "守护神只是角色未来可能显现的形态，不能据此认定角色已经学会【呼神护卫】，也不能直接给予数值奖励。"
         "所有属性必须覆盖完整目录，数值要克制、合理，并且理由必须能从角色设定中找到依据。"
+        "如果 adjustment_instruction 非空，它是玩家对初始属性方向的偏好；"
+        "应在不违反属性目录、数值上限和角色设定的前提下尽量遵守，不能把它当作直接修改数值的命令。"
         f"\n\n{ATTRIBUTE_INITIALIZATION_PROTOCOL}"
     )
     return [

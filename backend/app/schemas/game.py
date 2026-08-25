@@ -39,8 +39,17 @@ class SetupAnswer(BaseModel):
     answer: Any
 
 
+class SetupNavigate(BaseModel):
+    step: int = Field(ge=1, le=17)
+
+
 class SetupConfirm(BaseModel):
     confirmed: bool = True
+
+
+class AttributeInitializationRequest(BaseModel):
+    adjustment_instruction: str = Field(default="", max_length=2000)
+    force: bool = False
 
 
 RESOURCE_ID = Literal["health", "mana", "sanity", "energy", "satiety"]

@@ -1,0 +1,30 @@
+[app]
+name = "霍格沃兹人生模拟器"
+host = "127.0.0.1"
+port = 8000
+debug = false
+data_dir = "data"
+frontend_dist_dir = "frontend/dist"
+
+[database]
+url = "sqlite:///data/game.db"
+echo = false
+
+[llm]
+base_url = "https://api.example.com"
+api_key = "replace-with-your-api-key"
+model = "your-model-name"
+timeout_seconds = 300
+temperature = 0.8
+supports_json_schema = false
+stream = false
+
+[game]
+era_id = "second_generation"
+recent_narrative_turns = 10
+recent_turn_token_limit = 12000
+automatic_memory_recall_limit = 6
+memory_request_limit = 5
+worldline_min = 0.0
+worldline_max = 100.0
+

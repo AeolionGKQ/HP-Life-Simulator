@@ -1,0 +1,27 @@
+# Local secrets and runtime data
+config/settings.local.toml
+LLM API KEY.txt
+data/
+
+# Local-only launcher wrapper
+Start HP Simulator.bat
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+*.egg-info/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+
+# Editors and operating system
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

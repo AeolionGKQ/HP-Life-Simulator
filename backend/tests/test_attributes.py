@@ -208,3 +208,24 @@ def test_attribute_initialization_prompt_uses_same_protocol_for_every_era(
     assert "四个世代使用完全相同的属性规则" in system
     assert "resource_deltas" not in system
     assert "vital_deltas" not in system
+
+
+def test_attribute_initialization_prompt_includes_optional_adjustment_preference() -> None:
+    messages = build_attribute_initialization_messages(
+        SimpleNamespace(id="session", era_id="second_generation"),
+        SimpleNamespace(state={"setup": {"answers": {}}}),
+        adjustment_instruction="体质和意志稍高，但不要让属性过于极端",
+    )
+
+    assert "体质和意志稍高" in messages[1]["content"]
+    assert "玩家对初始属性方向的偏好" in messages[0]["content"]
+    assert "不能把它当作直接修改数值的命令" in messages[0]["content"]
+
+
+def test_attribute_initialization_prompt_keeps_empty_adjustment_backward_compatible() -> None:
+    messages = build_attribute_initialization_messages(
+        SimpleNamespace(id="session", era_id="second_generation"),
+        SimpleNamespace(state={"setup": {"answers": {}}}),
+    )
+
+    assert '"adjustment_instruction": ""' in messages[1]["content"]

@@ -362,6 +362,12 @@ h3 { margin-bottom: 5px; font-size: 17px; font-weight: 560; }
 .empty-panel p,
 .first-scene p { max-width: 520px; margin-bottom: 22px; }
 
+.attribute-regenerate { width: min(100%, 620px); margin: 18px auto 12px; }
+.attribute-regenerate > .secondary-button { min-width: 160px; }
+.attribute-regenerate-form { display: flex; flex-direction: column; gap: 9px; margin-top: 10px; }
+.attribute-regenerate-form textarea { width: 100%; min-height: 92px; resize: vertical; font-family: var(--serif); font-size: 13px; line-height: 1.75; }
+.attribute-regenerate-form .primary-button { align-self: flex-end; min-width: 160px; }
+
 .era-start-actions { display: flex; gap: 9px; width: min(100%, 600px); margin: 4px auto 0; }
 .era-start-actions input { flex: 1; width: auto; }
 .era-start-button { min-width: 172px; }
@@ -752,6 +758,8 @@ textarea:focus { border-color: var(--accent); background: #101610; outline: 0; }
   .reshape-fate-form { padding: 16px; }
   .reshape-fate-actions { align-items: stretch; flex-direction: column-reverse; }
   .reshape-fate-actions button { width: 100%; }
+  .attribute-regenerate { width: 100%; }
+  .attribute-regenerate-form .primary-button { width: 100%; }
   .fate-intervention-form { padding: 16px; }
   .fate-intervention-actions { align-items: stretch; flex-direction: column-reverse; }
   .fate-intervention-actions button { width: 100%; }

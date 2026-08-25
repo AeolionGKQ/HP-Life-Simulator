@@ -340,14 +340,23 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ step, answer }),
     }),
+  navigateSetup: (id: string, step: number) =>
+    request<SetupView>(`/api/sessions/${id}/setup/navigate`, {
+      method: "POST",
+      body: JSON.stringify({ step }),
+    }),
   confirmSetup: (id: string) =>
     request<SetupView>(`/api/sessions/${id}/setup/confirm`, {
       method: "POST",
       body: JSON.stringify({ confirmed: true }),
     }),
-  initializeAttributes: (id: string) =>
+  initializeAttributes: (id: string, adjustmentInstruction = "", force = false) =>
     request<SetupView>(`/api/sessions/${id}/attributes/initialize`, {
       method: "POST",
+      body: JSON.stringify({
+        adjustment_instruction: adjustmentInstruction,
+        force,
+      }),
     }),
   state: (id: string) => request<PlayerStateResponse>(`/api/sessions/${id}/state`),
   courses: (id: string) => request<CourseView>(`/api/sessions/${id}/courses`),

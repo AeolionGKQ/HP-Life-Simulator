@@ -5,6 +5,7 @@ data/
 
 # Local-only launcher wrapper
 Start HP Simulator.bat
+Andriod Version/android-test-data/
 
 # Python
 __pycache__/
