@@ -35,6 +35,9 @@ from backend.app.schemas.game import (
     SetupConfirm,
     SetupNavigate,
     SetupView,
+    StoryArcJobRead,
+    StoryArcRead,
+    StoryArcStatus,
     TurnResponse,
 )
 from backend.app.services.sessions import (
@@ -57,6 +60,12 @@ from backend.app.services.setup import (
     save_setup_answer,
 )
 from backend.app.services.turns import TurnGenerationError, generate_turn
+from backend.app.services.story_arcs import (
+    job_to_dict,
+    list_story_arc_reads,
+    retry_story_arc_job,
+    story_arc_status,
+)
 from backend.app.services.courses import get_courses_view, select_courses
 from backend.app.services.attributes import (
     AttributeInitializationError,
@@ -383,6 +392,47 @@ def delete_game_session(session_id: str, db: Session = Depends(get_db)) -> Respo
         raise HTTPException(status_code=404, detail="存档不存在")
     delete_session(db, game_session)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get(
+    "/sessions/{session_id}/story-arcs",
+    response_model=list[StoryArcRead],
+)
+def get_story_arcs(
+    session_id: str,
+    db: Session = Depends(get_db),
+) -> list[StoryArcRead]:
+    _require_session(db, session_id)
+    return [StoryArcRead.model_validate(item) for item in list_story_arc_reads(db, session_id)]
+
+
+@router.get(
+    "/sessions/{session_id}/story-arcs/status",
+    response_model=StoryArcStatus,
+)
+def get_story_arc_status(
+    session_id: str,
+    db: Session = Depends(get_db),
+) -> StoryArcStatus:
+    _require_session(db, session_id)
+    return StoryArcStatus.model_validate(story_arc_status(db, session_id))
+
+
+@router.post(
+    "/sessions/{session_id}/story-arcs/retry",
+    response_model=StoryArcJobRead,
+)
+async def retry_story_arc(
+    session_id: str,
+    db: Session = Depends(get_db),
+) -> StoryArcJobRead:
+    _require_session(db, session_id)
+    try:
+        return StoryArcJobRead.model_validate(
+            job_to_dict(retry_story_arc_job(db, session_id))
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/sessions/{session_id}/setup", response_model=SetupView)

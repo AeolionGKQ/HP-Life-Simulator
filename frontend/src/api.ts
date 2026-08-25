@@ -260,6 +260,41 @@ export interface StoredTurn {
   created_at: string;
 }
 
+export interface StoryArcJob {
+  id: string;
+  status: "pending" | "generating" | "ready" | "failed";
+  source_turn_start: number;
+  source_turn_end: number;
+  attempt: number;
+  error: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+}
+
+export interface StoryArc {
+  scope_key: string;
+  title: string;
+  summary: string;
+  causal_chain: unknown[];
+  open_threads: unknown[];
+  covered_turn_start: number | null;
+  covered_turn_end: number | null;
+  source_turn_ids: string[];
+  key_characters: string[];
+  key_locations: string[];
+  keywords: string[];
+  important_turns: number[];
+  updated_at: string;
+}
+
+export interface StoryArcStatus {
+  mode: "parallel" | "queue";
+  blocked: boolean;
+  active_job: StoryArcJob | null;
+  latest_failed_job: StoryArcJob | null;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     headers: { "Content-Type": "application/json" },
@@ -374,6 +409,11 @@ export const api = {
     request<Relationship[]>(`/api/sessions/${id}/relationships`),
   npcs: (id: string) => request<NPCState[]>(`/api/sessions/${id}/npcs`),
   turns: (id: string) => request<StoredTurn[]>(`/api/sessions/${id}/turns`),
+  storyArcs: (id: string) => request<StoryArc[]>(`/api/sessions/${id}/story-arcs`),
+  storyArcStatus: (id: string) =>
+    request<StoryArcStatus>(`/api/sessions/${id}/story-arcs/status`),
+  retryStoryArc: (id: string) =>
+    request<StoryArcJob>(`/api/sessions/${id}/story-arcs/retry`, { method: "POST" }),
   action: (
     id: string,
     payload: {

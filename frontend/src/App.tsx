@@ -35,6 +35,7 @@ const menuItems = [
   { label: "剧情", icon: BookOpenText },
   { label: "角色", icon: User },
   { label: "纪事", icon: Scroll },
+  { label: "记忆管理", icon: Archive },
   { label: "羁绊", icon: UsersThree },
   { label: "恋爱", icon: Heart },
   { label: "声望", icon: Medal },
@@ -68,7 +69,7 @@ export function App() {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [setup, setSetup] = useState<SetupView | null>(null);
   const [setupAnswer, setSetupAnswer] = useState("");
-  const [setupLoading, setSetupLoading] = useState(false);
+  const [setupLoading, setSetupLoading] = useState<"answer" | "navigate" | "confirm" | null>(null);
   const [worldlineRate, setWorldlineRate] = useState(0);
   const [configOpen, setConfigOpen] = useState(false);
   const configTriggerRef = useRef<HTMLButtonElement>(null);
@@ -199,7 +200,7 @@ export function App() {
         && setup.current_step !== 17
       )
     ) return;
-    setSetupLoading(true);
+    setSetupLoading("answer");
     setError("");
     try {
       const next = await api.answerSetup(
@@ -221,13 +222,13 @@ export function App() {
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "保存角色设定失败");
     } finally {
-      setSetupLoading(false);
+      setSetupLoading(null);
     }
   }
 
   async function navigateSetupBack() {
     if (!selectedSessionId || !setup || setup.current_step <= 1) return;
-    setSetupLoading(true);
+    setSetupLoading("navigate");
     setError("");
     try {
       const next = await api.navigateSetup(selectedSessionId, setup.current_step - 1);
@@ -235,13 +236,13 @@ export function App() {
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "返回上一步失败");
     } finally {
-      setSetupLoading(false);
+      setSetupLoading(null);
     }
   }
 
   async function confirmSetup() {
     if (!selectedSessionId) return;
-    setSetupLoading(true);
+    setSetupLoading("confirm");
     setError("");
     try {
       const next = await api.confirmSetup(selectedSessionId);
@@ -264,7 +265,7 @@ export function App() {
         setError(message);
       }
     } finally {
-      setSetupLoading(false);
+      setSetupLoading(null);
     }
   }
 
@@ -557,7 +558,7 @@ export function App() {
               </span>
               <h3>{setup.current.title}</h3>
               <p className="muted">{setup.current.description}</p>
-              {setupLoading && setup.current.selection_mode === "confirm" ? (
+              {setupLoading === "confirm" && setup.current.selection_mode === "confirm" ? (
                 <AttributeInitializationLoading />
               ) : setup.current.selection_mode === "confirm" ? (
                 <SetupSummary answers={setup.answers} eras={eras} />
@@ -596,7 +597,7 @@ export function App() {
                 {setup.current_step > 1 && (
                   <button
                     className="secondary-button"
-                    disabled={setupLoading}
+                    disabled={setupLoading !== null}
                     onClick={() => void navigateSetupBack()}
                   >
                     上一步
@@ -646,7 +647,7 @@ export function App() {
                             : "primary-button"
                       }
                       disabled={
-                        setupLoading ||
+                        setupLoading !== null ||
                         (
                           !setupAnswer.trim()
                           && setup.current_step !== 13
@@ -655,7 +656,7 @@ export function App() {
                       }
                       onClick={() => void submitSetupAnswer()}
                     >
-                      {setupLoading
+                      {setupLoading === "answer"
                         ? "保存中…"
                         : setup.current_step === 1
                           ? "以所选世代继续"
@@ -669,10 +670,14 @@ export function App() {
                 ) : (
                   <button
                     className="primary-button"
-                    disabled={setupLoading}
+                    disabled={setupLoading !== null}
                     onClick={() => void confirmSetup()}
                   >
-                    {setupLoading ? "确认中…" : "确认角色并开始"}
+                    {setupLoading === "confirm"
+                      ? "确认中…"
+                      : setupLoading === "navigate"
+                        ? "返回中…"
+                        : "确认角色并开始"}
                   </button>
                 )}
               </div>

@@ -29,7 +29,6 @@ from backend.app.models import (
     NPCState,
     PlayerState,
     Relationship,
-    StorySummary,
     TurnRecord,
 )
 from backend.app.providers.openai_compatible import OpenAICompatibleProvider
@@ -44,6 +43,12 @@ from backend.app.schemas.game import (
     TurnResponse,
 )
 from backend.app.services.memory import get_memories_by_ids, recall_memories
+from backend.app.services.story_arcs import (
+    build_story_arc_context,
+    ensure_story_arc_job,
+    is_story_arc_blocking,
+    schedule_story_arc_job,
+)
 
 
 class TurnGenerationError(RuntimeError):
@@ -566,11 +571,86 @@ def _normalize_player_changes(raw_changes: Any) -> dict[str, Any]:
     return changes
 
 
-def _action_text(payload: ActionRequest) -> str:
+START_STORY_CHOICE = {
+    "id": "start_story",
+    "label": "踏入魔法世界",
+    "kind": "action",
+    "risk": "low",
+    "requires": [],
+    "effects_hint": "",
+    "effects": {
+        "gains": [],
+        "losses": [],
+        "note": "",
+    },
+}
+
+
+def _resolve_selected_choice(
+    payload: ActionRequest,
+    latest: TurnRecord | None,
+) -> dict[str, Any] | None:
+    """将客户端提交的 choice_id 解析为上一节点中的完整选项。"""
+    if payload.kind != "choice":
+        return None
+    if not payload.choice_id:
+        raise HTTPException(status_code=409, detail="请选择有效的剧情选项")
+    if payload.choice_id == "start_story":
+        if latest is not None:
+            raise HTTPException(status_code=409, detail="开始剧情选项已失效，请刷新后重试")
+        return deepcopy(START_STORY_CHOICE)
+    if latest is None:
+        raise HTTPException(status_code=409, detail="当前没有可供选择的剧情节点")
+
+    raw_response = latest.llm_response
+    choices = raw_response.get("choices") if isinstance(raw_response, dict) else None
+    if not isinstance(choices, list):
+        raise HTTPException(status_code=409, detail="当前剧情节点缺少可用选项，请刷新后重试")
+    selected = next(
+        (
+            choice
+            for choice in choices
+            if isinstance(choice, dict)
+            and str(choice.get("id") or "") == payload.choice_id
+        ),
+        None,
+    )
+    if selected is None:
+        raise HTTPException(status_code=409, detail="所选剧情选项已失效，请刷新后重试")
+    try:
+        selected_choice = Choice.model_validate(selected)
+    except ValidationError as exc:
+        raise HTTPException(status_code=409, detail="当前剧情选项格式无效，请刷新后重试") from exc
+    if selected_choice.kind == "free_text":
+        raise HTTPException(status_code=409, detail="请在自由行动输入框中提交其他行动")
+    return selected_choice.model_dump(mode="json")
+
+
+def _build_action(
+    payload: ActionRequest,
+    selected_choice: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    action = payload.model_dump()
+    if selected_choice is not None:
+        action["selected_choice"] = deepcopy(selected_choice)
+        action["instruction"] = f"玩家明确选择了：{selected_choice['label']}"
+    return action
+
+
+def _action_text(
+    payload: ActionRequest,
+    selected_choice: dict[str, Any] | None = None,
+) -> str:
+    selected_label = (
+        str(selected_choice.get("label") or "")
+        if isinstance(selected_choice, dict)
+        else ""
+    )
     return " ".join(
         item
         for item in (
             payload.choice_id or "",
+            selected_label,
             payload.free_text or "",
             payload.fate_instruction or "",
             payload.reshape_instruction or "",
@@ -586,6 +666,8 @@ async def _reshape_latest_turn(
     payload: ActionRequest,
 ) -> TurnResponse:
     settings = get_settings()
+    if is_story_arc_blocking(db, game_session.id):
+        raise HTTPException(status_code=409, detail="故事弧正在整理，请稍候再提交剧情")
     existing = db.scalar(
         select(TurnRecord).where(
             TurnRecord.session_id == game_session.id,
@@ -643,13 +725,14 @@ async def _reshape_latest_turn(
         recent_turns,
         settings.game.recent_turn_token_limit,
     )
-    summaries = list(
-        db.scalars(
-            select(StorySummary)
-            .where(StorySummary.session_id == game_session.id)
-            .order_by(StorySummary.updated_at.desc())
-        )
+    story_context = build_story_arc_context(
+        db,
+        game_session.id,
+        action_text=_action_text(payload),
+        location_id=prompt_player_state.state.get("current_context", {}).get("location_id"),
+        actor_ids=[npc.npc_id for npc in prompt_npcs],
     )
+    summaries = story_context["story_arcs"]
     action = payload.model_dump()
     action["node_to_reshape"] = {
         "sequence": latest.sequence,
@@ -672,6 +755,7 @@ async def _reshape_latest_turn(
         recent_turns=recent_turns,
         memories=prompt_memories,
         summaries=summaries,
+        pending_turn_summaries=story_context["pending_turn_summaries"],
         action=action,
     )
     parsed_response = await _request_response(
@@ -704,6 +788,7 @@ async def _reshape_latest_turn(
             recent_turns=recent_turns,
             memories=prompt_memories + requested_memories,
             summaries=summaries,
+            pending_turn_summaries=story_context["pending_turn_summaries"],
             action=action,
         )
         parsed_response = await _request_response(
@@ -850,6 +935,9 @@ async def generate_turn(
     if game_session.status != "active" or initialization_status != "ready":
         raise HTTPException(status_code=409, detail="当前存档尚未进入可行动状态")
 
+    if is_story_arc_blocking(db, game_session.id):
+        raise HTTPException(status_code=409, detail="故事弧正在整理，请稍候再提交剧情")
+
     if payload.kind == "reshape_fate":
         return await _reshape_latest_turn(db, game_session, player_state, payload)
 
@@ -873,6 +961,16 @@ async def generate_turn(
     if isinstance(course_selection, dict) and course_selection.get("status") == "pending":
         raise HTTPException(status_code=409, detail="请先完成当前学年的课程选择")
 
+    latest_turn = None
+    if payload.kind == "choice":
+        latest_turn = db.scalar(
+            select(TurnRecord)
+            .where(TurnRecord.session_id == game_session.id)
+            .order_by(TurnRecord.sequence.desc())
+            .limit(1)
+        )
+    selected_choice = _resolve_selected_choice(payload, latest_turn)
+    action = _build_action(payload, selected_choice)
     current_context = player_state.state.get("current_context", {})
     npcs = list(
         db.scalars(select(NPCState).where(NPCState.session_id == game_session.id))
@@ -893,13 +991,14 @@ async def generate_turn(
         npcs,
         _parse_story_date(current_context.get("current_date")),
     )
-    summaries = list(
-        db.scalars(
-            select(StorySummary)
-            .where(StorySummary.session_id == game_session.id)
-            .order_by(StorySummary.updated_at.desc())
-        )
+    story_context = build_story_arc_context(
+        db,
+        game_session.id,
+        action_text=_action_text(payload, selected_choice),
+        location_id=current_context.get("location_id"),
+        actor_ids=[npc.npc_id for npc in npcs],
     )
+    summaries = story_context["story_arcs"]
     recent_turns = list(
         db.scalars(
             select(TurnRecord)
@@ -913,8 +1012,7 @@ async def generate_turn(
         recent_turns,
         settings.game.recent_turn_token_limit,
     )
-    action = payload.model_dump()
-    action_text = _action_text(payload)
+    action_text = _action_text(payload, selected_choice)
     actor_ids = [npc.npc_id for npc in npcs]
     memories = recall_memories(
         db,
@@ -932,6 +1030,7 @@ async def generate_turn(
         recent_turns=recent_turns,
         memories=memories,
         summaries=summaries,
+        pending_turn_summaries=story_context["pending_turn_summaries"],
         action=action,
     )
     previous_offset = float(
@@ -969,6 +1068,7 @@ async def generate_turn(
             recent_turns=recent_turns,
             memories=memories + requested_memories,
             summaries=summaries,
+            pending_turn_summaries=story_context["pending_turn_summaries"],
             action=action,
         )
         parsed_response = await _request_response(
@@ -1066,19 +1166,25 @@ async def generate_turn(
         turn.id,
         response.memory_update.model_dump(),
     )
-    if response.memory_update.summary:
-        db.add(
-            JournalEntry(
-                session_id=game_session.id,
-                turn_id=turn.id,
-                entry_type="turn",
-                title=response.turn.title,
-                summary=response.memory_update.summary,
-                data={"sequence": sequence},
-            )
+    db.add(
+        JournalEntry(
+            session_id=game_session.id,
+            turn_id=turn.id,
+            entry_type="turn",
+            title=response.turn.title,
+            summary=(
+                response.memory_update.summary.strip()
+                or (response.turn.narrative or "")[:200]
+                or response.turn.title
+            ),
+            data={"sequence": sequence},
         )
+    )
     db.commit()
     db.refresh(turn)
+    job = ensure_story_arc_job(db, game_session.id)
+    if job is not None:
+        schedule_story_arc_job(job.id)
     return TurnResponse(
         turn_id=turn.id,
         sequence=turn.sequence,
@@ -1508,9 +1614,25 @@ def _limit_recent_turns(
     selected: list[TurnRecord] = []
     used = 0
     for turn in reversed(turns):
-        turn_size = len(turn.narrative or "") + len(
-            json.dumps(turn.llm_response, ensure_ascii=False, default=str)
-        )
+        response = turn.llm_response if isinstance(turn.llm_response, dict) else {}
+        turn_data = response.get("turn", {}) if isinstance(response, dict) else {}
+        memory_update = turn.memory_update if isinstance(turn.memory_update, dict) else {}
+        compact_context = {
+            "sequence": turn.sequence,
+            "action": turn.action,
+            "title": turn_data.get("title"),
+            "scene_type": turn_data.get("scene_type"),
+            "current_date": turn_data.get("current_date"),
+            "location_id": turn_data.get("location_id"),
+            "narrative": turn.narrative,
+            "summary": memory_update.get("summary") or (turn.narrative or "")[:200],
+            "state_changes": (
+                turn.authoritative_changes.get("visible", {})
+                if isinstance(turn.authoritative_changes, dict)
+                else {}
+            ),
+        }
+        turn_size = len(json.dumps(compact_context, ensure_ascii=False, default=str))
         if selected and used + turn_size > approximate_char_limit:
             break
         selected.append(turn)

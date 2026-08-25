@@ -442,6 +442,13 @@ async function installApi(page: Page, scenario: Scenario) {
         },
       }],
       "/api/sessions/session-active/npcs": [{ npc_id: "luna_lovegood", is_original_character: false, state: { name: "卢娜·洛夫古德" } }],
+      "/api/sessions/session-active/story-arcs": [],
+      "/api/sessions/session-active/story-arcs/status": {
+        mode: "parallel",
+        blocked: false,
+        active_job: null,
+        latest_failed_job: null,
+      },
       "/api/sessions/session-active/turns": scenario === "story-initial"
         ? []
         : actionCompleted && actionAddsTurn
@@ -487,12 +494,15 @@ async function installApi(page: Page, scenario: Scenario) {
       }
     }
     if (path === "/api/sessions/session-setup/setup/navigate" && request.method() === "POST") {
+      if (scenario === "setup-confirm") {
+        await new Promise((resolve) => setTimeout(resolve, 350));
+      }
       await route.fulfill({ status: 200, json: previousSetupView });
       return;
     }
     if (path === "/api/sessions/session-active/attributes/initialize" && request.method() === "POST") {
       attributeRegenerated = true;
-      await new Promise((resolve) => setTimeout(resolve, 350));
+      await new Promise((resolve) => setTimeout(resolve, scenario === "story-initial" ? 1000 : 350));
       await route.fulfill({ status: 200, json: completedSetup });
       return;
     }
@@ -751,6 +761,23 @@ for (const viewport of viewports) {
       await assertNoHorizontalOverflow(page);
     });
 
+    test("does not show attribute calibration progress while returning from final setup step", async ({ page }) => {
+      await installApi(page, "setup-confirm");
+      await page.goto("/");
+      await page.getByRole("button", { name: `打开存档：${setupSession.name}` }).click();
+      await expect(page.getByRole("heading", { name: finalSetupView.current.title })).toBeVisible();
+
+      const navigationResponse = page.waitForResponse(
+        (response) =>
+          response.url().includes("/api/sessions/session-setup/setup/navigate")
+          && response.request().method() === "POST",
+      );
+      await page.getByRole("button", { name: "上一步" }).click();
+      await expect(page.getByRole("status")).toHaveCount(0);
+      await navigationResponse;
+      await expect(page.getByRole("heading", { name: previousSetupView.current.title })).toBeVisible();
+    });
+
     test("captures the active story archive", async ({ page }) => {
       await installApi(page, "story");
       await page.goto("/");
@@ -788,13 +815,15 @@ for (const viewport of viewports) {
           && request.method() === "POST",
       );
       await page.getByRole("button", { name: "确认重新生成" }).click();
+      await expect(page.getByRole("status")).toContainText("命运正在重新校准你的魔法回响");
+      await expect(page.getByRole("button", { name: "踏入魔法世界" })).toHaveCount(0);
       const request = await requestPromise;
       expect(request.postDataJSON()).toEqual({
         adjustment_instruction: "体质和意志稍高，魔力保持普通",
         force: true,
       });
-      await expect(page.getByRole("button", { name: "踏入魔法世界" })).toBeDisabled();
       await expect(page.getByText("按偏好重新生成")).toBeVisible();
+      await expect(page.getByRole("button", { name: "踏入魔法世界" })).toBeEnabled();
       await expect(page.getByRole("textbox", { name: "属性调整说明" })).toHaveCount(0);
       if (viewport.name === "mobile") await assertMinimumTouchTargets(page);
       await assertNoHorizontalOverflow(page);

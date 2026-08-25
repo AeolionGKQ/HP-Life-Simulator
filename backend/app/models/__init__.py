@@ -5,6 +5,8 @@ from backend.app.models.game import (
     NPCState,
     PlayerState,
     Relationship,
+    StoryArcGenerationJob,
+    StoryArc,
     StorySummary,
     TurnRecord,
 )
@@ -18,5 +20,7 @@ __all__ = [
     "JournalEntry",
     "LongTermMemory",
     "StorySummary",
+    "StoryArc",
+    "StoryArcGenerationJob",
 ]
 

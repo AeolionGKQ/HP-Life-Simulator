@@ -648,6 +648,20 @@ textarea:focus { border-color: var(--accent); background: #101610; outline: 0; }
 .relationship-row .bond-detail { flex-basis: 100%; margin-top: 0; line-height: 1.55; }
 .romance-row { border-left: 2px solid var(--danger); background: rgba(209, 139, 128, 0.05); }
 
+.story-arc-notice { display: flex; align-items: center; gap: 10px; margin: 0 0 16px; padding: 11px 14px; border: 1px solid rgba(194, 155, 82, .38); border-radius: 8px; background: rgba(194, 155, 82, .08); color: var(--text); font-size: 12px; }
+.story-arc-notice strong { color: var(--accent); white-space: nowrap; }
+.story-arc-notice span { color: var(--muted); line-height: 1.55; }
+.story-arc-notice .secondary-button { margin-left: auto; flex: 0 0 auto; }
+.story-arc-notice.is-blocking { border-color: rgba(194, 155, 82, .65); }
+.story-arc-panel { display: grid; gap: 14px; }
+.story-arc-card { padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255, 255, 255, .02); }
+.story-arc-card-meta { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font: 11px var(--sans); }
+.story-arc-card h3 { margin: 10px 0 8px; color: var(--accent); }
+.story-arc-card p { margin: 0; line-height: 1.8; white-space: pre-wrap; }
+.story-arc-threads { margin-top: 14px; color: var(--muted); font-size: 12px; }
+.story-arc-threads strong { color: var(--text); }
+.story-arc-threads ul { margin: 7px 0 0; padding-left: 20px; line-height: 1.7; }
+
 .worldline-panel { text-align: center; }
 .worldline-large { margin: 34px 0 8px; color: var(--accent); font: 620 clamp(44px, 8vw, 72px) var(--sans); letter-spacing: -0.04em; }
 .worldline-panel > p { color: var(--muted); }
@@ -781,6 +795,10 @@ textarea:focus { border-color: var(--accent); background: #101610; outline: 0; }
   .readable-row { grid-template-columns: 1fr; gap: 5px; }
   .relationship-row,
   .choice-button { align-items: flex-start; flex-direction: column; }
+  .story-arc-notice { align-items: flex-start; flex-direction: column; }
+  .story-arc-notice strong { white-space: normal; }
+  .story-arc-notice .secondary-button { width: 100%; margin-left: 0; }
+  .story-arc-card-meta { flex-direction: column; gap: 4px; }
   .choice-button small { white-space: normal; }
   .game-meta span:last-child { margin-left: 0; }
   .narrative-card { padding-inline: 0; }

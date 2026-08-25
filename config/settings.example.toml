@@ -17,6 +17,7 @@ model = "your-model-name"
 timeout_seconds = 300
 temperature = 0.8
 supports_json_schema = false
+supports_concurrent_requests = true
 stream = false
 
 [game]
@@ -25,6 +26,9 @@ recent_narrative_turns = 10
 recent_turn_token_limit = 12000
 automatic_memory_recall_limit = 6
 memory_request_limit = 5
+allow_story_arc_parallel_with_gameplay = true
+story_arc_turns = 25
+story_arc_job_timeout_seconds = 900
 worldline_min = 0.0
 worldline_max = 100.0
 

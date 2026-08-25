@@ -41,6 +41,7 @@ class LLMSettings(BaseModel):
     timeout_seconds: float = Field(default=300, gt=0)
     temperature: float = Field(default=0.8, ge=0, le=2)
     supports_json_schema: bool = False
+    supports_concurrent_requests: bool = True
     stream: bool = False
 
     @field_validator("base_url")
@@ -57,6 +58,9 @@ class GameSettings(BaseModel):
     recent_turn_token_limit: int = Field(default=12000, ge=1000)
     automatic_memory_recall_limit: int = Field(default=6, ge=1, le=20)
     memory_request_limit: int = Field(default=5, ge=1, le=10)
+    allow_story_arc_parallel_with_gameplay: bool = True
+    story_arc_turns: int = Field(default=25, ge=5, le=100)
+    story_arc_job_timeout_seconds: int = Field(default=900, ge=60, le=86400)
     worldline_min: float = 0.0
     worldline_max: float = 100.0
 
