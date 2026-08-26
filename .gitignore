@@ -2,6 +2,7 @@
 config/settings.local.toml
 LLM API KEY.txt
 data/
+Andriod Version/*.apk*
 
 # Local-only launcher wrapper
 Start HP Simulator.bat
