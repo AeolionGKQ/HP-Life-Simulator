@@ -171,8 +171,8 @@
 
 前往 [GitHub Releases](https://github.com/AeolionGKQ/HP-Life-Simulator/releases/latest)，在最新版本的 **Assets** 中选择适合自己的行李：
 
-- **电脑版：** 下载 `霍格沃兹人生模拟器v2.6-电脑版.zip`，完整解压后双击 `start_hp_simulator.bat`；
-- **手机版：** 下载 `霍格沃兹人生模拟器v2.6-安卓版.apk`，在 Android 7.0 及以上的 64 位设备上安装。
+- **电脑版：** 下载 `HP-Life-Simulator-v2.6-Windows.zip`，完整解压后双击 `start_hp_simulator.bat`；
+- **手机版：** 下载 `HP-Life-Simulator-v2.6-Android.apk`，在 Android 7.0 及以上的 64 位设备上安装。
 
 安装 APK 时，系统可能会询问是否允许浏览器或文件管理器“安装未知应用”。这是 Android 安装从 GitHub 下载的应用时的正常提示；请只使用本仓库 Release 中的安装包，并在完成后按自己的安全习惯关闭该权限。
 
