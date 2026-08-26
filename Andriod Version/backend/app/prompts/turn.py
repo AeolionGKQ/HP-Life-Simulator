@@ -9,7 +9,7 @@ from backend.app.models import (
     NPCState,
     PlayerState,
     Relationship,
-    StorySummary,
+    StoryArc,
     TurnRecord,
 )
 from backend.app.content.mainlines import build_generation_context
@@ -268,6 +268,19 @@ NAME_AND_ADDRESS_RULES = """人物称呼必须遵守西方魔法世界的姓名�
 旁白一般采用朋友/熟人式称呼，但在正式介绍、档案、强调身份或需要制造距离时可以使用全名。
 不要因为人物来自英国或魔法世界，就擅自把姓氏放到名字前面，也不要把熟人的名误当作姓。"""
 
+CHOICE_SELECTION_RULES = """如果本回合 player_action.kind 是 choice：
+player_action.selected_choice 是程序根据上一节点 choices 校验后的玩家明确选择，必须优先承接其中的 label 和行动意图。
+choice_id 只是稳定标识，不能单独作为行动含义；不要把一个 choice_id 推测成另一个选项。
+玩家选择不是必然成功，可以成功、部分成功、失败或付出代价，但 narrative 必须针对 selected_choice 展开，
+不能把它改写成其他选项，也不能因为失败就假装玩家选择了别的行动。
+如果本回合是 start_story，selected_choice.label 表示玩家选择正式踏入当前剧情起点。"""
+
+NARRATIVE_STYLE_RULES = """narrative 必须是本回合完整、连贯、可读的剧情正文，不是纪事摘要、提纲或几句结论。
+根据当前行动和场景需要展开关键动作、感官、对白、人物反应、因果过渡和结果；重要事件不能为了节省字数被过度压缩。
+叙事长度和节奏应随剧情变化：普通移动可以简洁，冲突、发现、对话和关键选择应给出足够的过程与反应。
+不要机械套用固定的开场、镜头顺序、句式或段落模板；可以根据本回合内容从动作、对白、感官、环境或人物反应切入。
+不要为了显得详细而添加与当前行动无关的填充内容，也不要把每回合写成相同格式的播报。"""
+
 FATE_INTERVENTION_RULES = """如果本回合 player_action.kind 是 fate_intervention，当前请求属于【干涉命运】作弊模式。
 玩家提交的 fate_instruction 不是“角色尝试采取的行动”，而是玩家指定下一个剧情节点必须实际发生的核心事件。
 你必须在这一个新剧情节点中让指定事件成为正在发生的事实或当前场景核心，
@@ -349,8 +362,9 @@ def build_turn_messages(
     relationships: list[Relationship],
     recent_turns: list[TurnRecord],
     memories: list[LongTermMemory],
-    summaries: list[StorySummary],
+    summaries: list[StoryArc],
     action: dict[str, Any],
+    pending_turn_summaries: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, str]]:
     school = player_state.state.get("school", {})
     if not isinstance(school, dict):
@@ -398,6 +412,12 @@ player_state.character_notes 是玩家对角色的自由补充设定。每轮叙
 每轮必须同时在 turn.location_name 返回与 location_id 对应的中文地点名称，用于玩家显示；
 location_id 是稳定的英文原始地点 ID，用于程序规则和状态保存，例如 location_id="ollivanders" 时，
 例如 location_name="奥利凡德魔杖店" 时，必须返回对应中文地点名称；旧地点没有合适中文名时，location_name 可以为空字符串。
+player_state.current_context 是当前日期和地点的唯一权威状态来源；recent_turns 中的 scene_date、
+scene_location_id 和 scene_location_name 只用于说明历史回合发生地点，并不代表当前地点。
+generation.timeline_phase 只用于主线阶段和学籍背景判断，不提供当前日期或地点。
+顶部界面已经单独显示当前日期和地点，narrative 正文不要机械重复日期、时间和地点播报；
+除非日期或地点本身是本回合的戏剧重点，否则直接从动作、感官、对白或事件切入，不要每轮使用
+“某年某月某日某时，某地……”的固定开头。
 不要返回具体时分，也不要使用 time_advance_minutes；日期推进由 current_date 的绝对日期负责。
 上下文中的 generation.generation_mainline 是当前世代的长期剧情锚点。每轮推进都要与该主线保持时代和因果关联；
 可以因玩家选择改变具体结局，但不得无故跳离该世代、遗忘核心冲突或引入其他世代的主线人物与事件。
@@ -465,9 +485,21 @@ course_selection 和 course_history 只能由程序与玩家课程 API 修改。
         {NAME_AND_ADDRESS_RULES}"""
     system = f"{system}\n\n{STORY_MILESTONE_RULES}"
     system = f"{system}\n\n{MAINLINE_CONTEXT_RULES}"
+    system = f"{system}\n\n{CHOICE_SELECTION_RULES}"
+    system = f"{system}\n\n{NARRATIVE_STYLE_RULES}"
     system = f"{system}\n\n{FATE_INTERVENTION_RULES}"
     system = f"{system}\n\n{RESHAPE_FATE_RULES}"
     system = f"{system}\n\n{SCHOOL_DEPARTURE_RULES}"
+    system = (
+        f"{system}\n\n"
+        "上下文中的 recent_turns 是最近剧情原文，pending_turn_summaries 是尚未归档的较早节点摘要，"
+        "story_arcs 是已经验证完成的阶段性故事弧。三者共同构成剧情历史；不得把摘要中没有写明的细节当作既定事实。"
+        "recent_turns 的 scene_date、scene_location_id 和 scene_location_name 只在相邻回合发生变化时出现；"
+        "如果字段缺失，表示与上一条 recent_turns 的对应场景元数据相同。"
+        "recent_turns.state_changes 是程序已经实际应用的历史状态变化，不是模型尚未裁决的提案；"
+        "生成连续剧情时应参考其中的前后值、增减量、reason 和 evidence，保持重复状态变化的因果连贯，"
+        "但必须结合本回合真实行动重新判断，不能机械复制旧理由。"
+    )
     if origin_prompt_rules:
         system = f"{system}\n\n{origin_prompt_rules}"
     if (
@@ -494,6 +526,13 @@ course_selection 和 course_history 只能由程序与玩家课程 API 修改。
         action=action,
         memories=memories,
     )
+    generation_timeline = generation_context.get("timeline_phase")
+    if isinstance(generation_timeline, dict):
+        generation_context["timeline_phase"] = {
+            key: value
+            for key, value in generation_timeline.items()
+            if key not in {"calendar_date", "calendar_year"}
+        }
     context = {
         "session": {
             "id": game_session.id,
@@ -529,16 +568,6 @@ course_selection 和 course_history 只能由程序与玩家课程 API 修改。
             "skill_level_range": [SKILL_LEVEL_MIN, SKILL_LEVEL_MAX],
             "june_progression": "active_courses_only",
         },
-        "timeline": {
-            "previous_date": (
-                player_state.state.get("current_context", {}).get("current_date")
-                or str(player_state.state.get("current_context", {}).get("datetime", ""))[:10]
-            ),
-            "previous_location_id": player_state.state.get("current_context", {}).get(
-                "location_id", "unknown"
-            ),
-            "rule": "只返回 YYYY-MM-DD 日期；地点使用稳定的 location_id；日期不得倒退。",
-        },
         "current_traits": player_state.state.get("traits", []),
         "current_statuses": player_state.state.get("statuses", []),
         "current_skills": player_state.state.get("skills", {}),
@@ -563,24 +592,23 @@ course_selection 和 course_history 只能由程序与玩家课程 API 修改。
             }
             for relationship in relationships
         ],
-        "recent_turns": [
-            {
-                "sequence": turn.sequence,
-                "action": turn.action,
-                "narrative": turn.narrative,
-                "llm_response": turn.llm_response,
-                "memory_update": turn.memory_update,
-            }
-            for turn in recent_turns
-        ],
+        "recent_turns": _recent_turns_to_context(recent_turns),
+        "pending_turn_summaries": pending_turn_summaries or [],
         "long_term_memories": [_memory_to_context(memory) for memory in memories],
-        "story_summaries": [
+        "story_arcs": [
             {
-                "scope": summary.scope,
                 "scope_key": summary.scope_key,
+                "status": summary.status,
+                "title": summary.title,
                 "summary": summary.summary,
                 "causal_chain": summary.causal_chain,
                 "open_threads": summary.open_threads,
+                "key_characters": summary.key_characters,
+                "key_locations": summary.key_locations,
+                "keywords": summary.keywords,
+                "important_turns": summary.important_turns,
+                "covered_turn_start": summary.covered_turn_start,
+                "covered_turn_end": summary.covered_turn_end,
             }
             for summary in summaries
         ],
@@ -616,3 +644,60 @@ def _memory_to_context(memory: LongTermMemory) -> dict[str, Any]:
         "open_threads": memory.open_threads,
         "source_turn_ids": memory.source_turn_ids,
     }
+
+
+def _recent_turn_to_context(turn: TurnRecord) -> dict[str, Any]:
+    response = turn.llm_response if isinstance(turn.llm_response, dict) else {}
+    turn_data = response.get("turn", {}) if isinstance(response, dict) else {}
+    memory_update = turn.memory_update if isinstance(turn.memory_update, dict) else {}
+    return {
+        "sequence": turn.sequence,
+        "action": turn.action,
+        "title": turn_data.get("title"),
+        "scene_type": turn_data.get("scene_type"),
+        "current_date": turn_data.get("current_date"),
+        "location_id": turn_data.get("location_id"),
+        "location_name": turn_data.get("location_name"),
+        "narrative": turn.narrative,
+        "summary": (
+            str(memory_update.get("summary") or "").strip()
+            or (turn.narrative or "")[:200]
+        ),
+        "state_changes": (
+            turn.authoritative_changes.get("visible", {})
+            if isinstance(turn.authoritative_changes, dict)
+            else {}
+        ),
+    }
+
+
+def _recent_turns_to_context(turns: list[TurnRecord]) -> list[dict[str, Any]]:
+    """保留历史场景变化，避免每个回合重复注入相同日期和地点。"""
+    contexts: list[dict[str, Any]] = []
+    previous_date: Any = None
+    previous_location_id: Any = None
+    previous_location_name: Any = None
+    for turn in turns:
+        context = _recent_turn_to_context(turn)
+        current_date = context.pop("current_date", None)
+        current_location_id = context.pop("location_id", None)
+        current_location_name = context.pop("location_name", None)
+        if current_date and current_date != previous_date:
+            context["scene_date"] = current_date
+        if current_location_id and current_location_id != previous_location_id:
+            context["scene_location_id"] = current_location_id
+            if current_location_name:
+                context["scene_location_name"] = current_location_name
+        elif (
+            current_location_name
+            and current_location_name != previous_location_name
+        ):
+            context["scene_location_name"] = current_location_name
+        contexts.append(context)
+        if current_date:
+            previous_date = current_date
+        if current_location_id:
+            previous_location_id = current_location_id
+        if current_location_name:
+            previous_location_name = current_location_name
+    return contexts

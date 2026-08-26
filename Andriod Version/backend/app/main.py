@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from backend.app.api.routes import router
 from backend.app.core.config import get_settings
 from backend.app.db.session import initialize_database
+from backend.app.services.story_arcs import recover_story_arc_jobs
 
 
 @asynccontextmanager
@@ -17,6 +18,7 @@ async def lifespan(_: FastAPI):
     settings = get_settings()
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     initialize_database()
+    recover_story_arc_jobs()
     yield
 
 

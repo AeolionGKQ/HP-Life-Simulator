@@ -107,6 +107,7 @@ def _prepare_config(files_dir: str) -> Path:
         # Match the PC default. Some OpenAI-compatible services reject
         # response_format on the simple connectivity probe.
         "supports_json_schema = false\n"
+        "supports_concurrent_requests = true\n"
         f"stream = false\n\n"
         "[game]\n"
         "era_id = \"second_generation\"\n"
@@ -114,11 +115,15 @@ def _prepare_config(files_dir: str) -> Path:
         "recent_turn_token_limit = 12000\n"
         "automatic_memory_recall_limit = 6\n"
         "memory_request_limit = 5\n"
+        "allow_story_arc_parallel_with_gameplay = true\n"
+        "story_arc_turns = 25\n"
+        "story_arc_job_timeout_seconds = 900\n"
         "worldline_min = 0.0\n"
         "worldline_max = 100.0\n",
         encoding="utf-8",
     )
     os.environ["HP_SIMULATOR_CONFIG"] = str(config_path)
+    os.environ["HP_SIMULATOR_ANDROID"] = "1"
     return config_path
 
 
@@ -161,15 +166,24 @@ def _load_runtime_unlocked(files_dir: str) -> dict[str, Any]:
     from backend.app.services.setup import (
         confirm_setup,
         get_setup_view,
+        navigate_setup_step,
         save_setup_answer,
     )
     from backend.app.services.turns import TurnGenerationError, generate_turn
+    from backend.app.services.story_arcs import (
+        job_to_dict,
+        list_story_arc_reads,
+        retry_story_arc_job,
+        story_arc_status,
+    )
     from backend.app.schemas.common import LLMConfigUpdate
     from backend.app.schemas.game import (
         ActionRequest,
+        AttributeInitializationRequest,
         CourseSelectionRequest,
         SetupAnswer,
         SetupConfirm,
+        SetupNavigate,
     )
     from backend.app.schemas.sessions import SessionCreate, SessionRename
 
@@ -196,14 +210,21 @@ def _load_runtime_unlocked(files_dir: str) -> dict[str, Any]:
         "rename_session": rename_session,
         "confirm_setup": confirm_setup,
         "get_setup_view": get_setup_view,
+        "navigate_setup_step": navigate_setup_step,
         "save_setup_answer": save_setup_answer,
         "TurnGenerationError": TurnGenerationError,
         "generate_turn": generate_turn,
+        "job_to_dict": job_to_dict,
+        "list_story_arc_reads": list_story_arc_reads,
+        "retry_story_arc_job": retry_story_arc_job,
+        "story_arc_status": story_arc_status,
         "LLMConfigUpdate": LLMConfigUpdate,
         "ActionRequest": ActionRequest,
+        "AttributeInitializationRequest": AttributeInitializationRequest,
         "CourseSelectionRequest": CourseSelectionRequest,
         "SetupAnswer": SetupAnswer,
         "SetupConfirm": SetupConfirm,
+        "SetupNavigate": SetupNavigate,
         "SessionCreate": SessionCreate,
         "SessionRename": SessionRename,
     }
@@ -252,8 +273,8 @@ def _get_session_or_raise(runtime: dict[str, Any], db: Any, session_id: str) -> 
     return session
 
 
-def _run_async(function: Any, *args: Any) -> Any:
-    return asyncio.run(function(*args))
+def _run_async(function: Any, *args: Any, **kwargs: Any) -> Any:
+    return asyncio.run(function(*args, **kwargs))
 
 
 def request(path: str, method: str, body: str, files_dir: str) -> str:
@@ -314,6 +335,7 @@ def request(path: str, method: str, body: str, files_dir: str) -> str:
                 timeout_seconds=settings.llm.timeout_seconds,
                 temperature=settings.llm.temperature,
                 supports_json_schema=settings.llm.supports_json_schema,
+                supports_concurrent_requests=settings.llm.supports_concurrent_requests,
                 stream=False,
             )
         result = _run_async(runtime["provider"](llm_settings).test_connection)
@@ -435,6 +457,16 @@ def request(path: str, method: str, body: str, files_dir: str) -> str:
                     for item in runtime["list_memories"](db, session_id)
                 ]
             )
+        if suffix == "story-arcs" and method == "GET":
+            return _dump(runtime["list_story_arc_reads"](db, session_id))
+        if suffix == "story-arcs/status" and method == "GET":
+            return _dump(runtime["story_arc_status"](db, session_id))
+        if suffix == "story-arcs/retry" and method == "POST":
+            return _dump(
+                runtime["job_to_dict"](
+                    runtime["retry_story_arc_job"](db, session_id)
+                )
+            )
         if suffix == "relationships" and method == "GET":
             return _dump(
                 [
@@ -474,6 +506,16 @@ def request(path: str, method: str, body: str, files_dir: str) -> str:
             )
         if suffix == "setup" and method == "GET":
             return _dump(runtime["get_setup_view"](session, player_state))
+        if suffix == "setup/navigate" and method == "POST":
+            navigate = runtime["SetupNavigate"].model_validate(payload)
+            return _dump(
+                runtime["navigate_setup_step"](
+                    db,
+                    session,
+                    player_state,
+                    navigate,
+                )
+            )
         if suffix == "setup/answer" and method == "POST":
             answer = runtime["SetupAnswer"].model_validate(payload)
             return _dump(runtime["save_setup_answer"](db, session, player_state, answer))
@@ -498,7 +540,15 @@ def request(path: str, method: str, body: str, files_dir: str) -> str:
         if suffix == "attributes/initialize" and method == "POST":
             if not player_state.state.get("setup", {}).get("completed"):
                 raise ValueError("角色创建尚未完成")
-            _run_async(runtime["initialize_attributes"], db, session, player_state)
+            request = runtime["AttributeInitializationRequest"].model_validate(payload)
+            _run_async(
+                runtime["initialize_attributes"],
+                db,
+                session,
+                player_state,
+                adjustment_instruction=request.adjustment_instruction,
+                force=request.force,
+            )
             return _dump(runtime["get_setup_view"](session, player_state))
         if suffix == "actions" and method == "POST":
             action = runtime["ActionRequest"].model_validate(payload)

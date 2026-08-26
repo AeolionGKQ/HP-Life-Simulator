@@ -14,6 +14,8 @@ from backend.app.models import (
     NPCState,
     PlayerState,
     Relationship,
+    StoryArc,
+    StoryArcGenerationJob,
     StorySummary,
     TurnRecord,
 )
@@ -165,6 +167,8 @@ def delete_session(db: Session, game_session: GameSession) -> None:
     for model in (
         JournalEntry,
         LongTermMemory,
+        StoryArcGenerationJob,
+        StoryArc,
         StorySummary,
         Relationship,
         NPCState,

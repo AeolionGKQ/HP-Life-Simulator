@@ -71,7 +71,7 @@ SETUP_STEPS = [
     SetupStep(
         step=4,
         title="生日",
-        description="每个巫师出生的那一天，都像一颗落入时间长河的星辰。请以 YYYY-MM-DD 格式写下这颗星辰亮起的日期，它将成为年龄、记忆与命运流转的起点。",
+        description="每个巫师出生的那一天，都像一颗落入时间长河的星辰。请以月-日-年的格式写下这颗星辰亮起的日期，它将成为年龄、记忆与命运流转的起点。",
         options=[],
         selection_mode="text",
     ),

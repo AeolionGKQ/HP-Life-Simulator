@@ -35,6 +35,7 @@ const menuItems = [
   { label: "剧情", icon: BookOpenText },
   { label: "角色", icon: User },
   { label: "纪事", icon: Scroll },
+  { label: "记忆管理", icon: Archive },
   { label: "羁绊", icon: UsersThree },
   { label: "恋爱", icon: Heart },
   { label: "声望", icon: Medal },
@@ -69,7 +70,7 @@ export function App() {
   const [setup, setSetup] = useState<SetupView | null>(null);
   const [setupSessionId, setSetupSessionId] = useState<string | null>(null);
   const [setupAnswer, setSetupAnswer] = useState("");
-  const [setupLoading, setSetupLoading] = useState(false);
+  const [setupLoading, setSetupLoading] = useState<"answer" | "navigate" | "confirm" | null>(null);
   const [newSessionRequest, setNewSessionRequest] = useState(0);
   const [worldlineRate, setWorldlineRate] = useState(0);
   const [configOpen, setConfigOpen] = useState(false);
@@ -236,7 +237,7 @@ export function App() {
         && setup.current_step !== 17
       )
     ) return;
-    setSetupLoading(true);
+    setSetupLoading("answer");
     setError("");
     try {
       const next = await api.answerSetup(
@@ -258,13 +259,27 @@ export function App() {
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "保存角色设定失败");
     } finally {
-      setSetupLoading(false);
+      setSetupLoading(null);
+    }
+  }
+
+  async function navigateSetupBack() {
+    if (!selectedSessionId || !setup || setup.current_step <= 1) return;
+    setSetupLoading("navigate");
+    setError("");
+    try {
+      const next = await api.navigateSetup(selectedSessionId, setup.current_step - 1);
+      setSetup(next);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "返回上一步失败");
+    } finally {
+      setSetupLoading(null);
     }
   }
 
   async function confirmSetup() {
     if (!selectedSessionId) return;
-    setSetupLoading(true);
+    setSetupLoading("confirm");
     setError("");
     try {
       const next = await api.confirmSetup(selectedSessionId);
@@ -287,7 +302,7 @@ export function App() {
         setError(message);
       }
     } finally {
-      setSetupLoading(false);
+      setSetupLoading(null);
     }
   }
 
@@ -580,7 +595,7 @@ export function App() {
               </span>
               <h3>{setup.current.title}</h3>
               <p className="muted">{setup.current.description}</p>
-              {setupLoading && setup.current.selection_mode === "confirm" ? (
+              {setupLoading === "confirm" && setup.current.selection_mode === "confirm" ? (
                 <AttributeInitializationLoading />
               ) : setup.current.selection_mode === "confirm" ? (
                 <SetupSummary answers={setup.answers} eras={eras} />
@@ -619,75 +634,103 @@ export function App() {
                 {setup.current.selection_mode !== "confirm" ? (
                   <>
                     {setup.current_step !== 1 && setup.current_step !== 14 && setup.current_step !== 15 && (
-                      setup.current_step === 4 ? (
-                        <input
-                          aria-label="生日"
-                          autoComplete="bday"
-                          type="date"
-                          value={setupAnswer}
-                          onChange={(event) => setSetupAnswer(event.target.value)}
-                        />
-                      ) : (
-                        <textarea
-                          aria-label={setup.current.title}
-                          value={setupAnswer}
-                          onChange={(event) => setSetupAnswer(event.target.value)}
-                          placeholder={
-                            setup.current.selection_mode === "append"
-                              ? "点击预设会追加到这里，也可以继续输入，用逗号分隔"
-                              : setup.current_step === 2
-                                ? "输入角色姓名"
-                                : setup.current_step === 16
-                                  ? "选择上方预设，或写下你的独特守护神"
-                                  : setup.current_step === 17
-                                    ? "写下任何希望魔法世界记住的角色设定（可留空）"
-                                : "选择上方预设，或输入自定义设定"
-                          }
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
-                              void submitSetupAnswer();
+                      <div className="setup-answer-field">
+                        {setup.current_step === 4 ? (
+                          <input
+                            aria-label="生日"
+                            autoComplete="bday"
+                            type="date"
+                            value={setupAnswer}
+                            onChange={(event) => setSetupAnswer(event.target.value)}
+                          />
+                        ) : (
+                          <textarea
+                            aria-label={setup.current.title}
+                            value={setupAnswer}
+                            onChange={(event) => setSetupAnswer(event.target.value)}
+                            placeholder={
+                              setup.current.selection_mode === "append"
+                                ? "点击预设会追加到这里，也可以继续输入，用逗号分隔"
+                                : setup.current_step === 2
+                                  ? "输入角色姓名"
+                                  : setup.current_step === 16
+                                    ? "选择上方预设，或写下你的独特守护神"
+                                    : setup.current_step === 17
+                                      ? "写下任何希望魔法世界记住的角色设定（可留空）"
+                                  : "选择上方预设，或输入自定义设定"
                             }
-                          }}
-                        />
-                      )
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                                void submitSetupAnswer();
+                              }
+                            }}
+                          />
+                        )}
+                      </div>
                     )}
-                    <button
-                      className={
-                        setup.current_step === 1
-                          ? "primary-button setup-era-next"
-                          : setup.current_step === 15
-                            ? "primary-button setup-single-next"
-                            : "primary-button"
-                      }
-                      disabled={
-                        setupLoading ||
-                        (
-                          !setupAnswer.trim()
-                          && setup.current_step !== 13
-                          && setup.current_step !== 17
-                        )
-                      }
-                      onClick={() => void submitSetupAnswer()}
-                    >
-                      {setupLoading
-                        ? "保存中…"
-                        : setup.current_step === 1
-                          ? "以所选世代继续"
-                          : setup.current_step === 13 && !setupAnswer.trim()
-                            ? "不选择预设好友，继续"
-                            : setup.current_step === 17 && !setupAnswer.trim()
-                              ? "不再补充，继续"
-                            : "下一步"}
-                    </button>
+                    <div className="setup-navigation-actions">
+                      {setup.current_step > 1 && (
+                        <button
+                          className="secondary-button"
+                          disabled={setupLoading !== null}
+                          onClick={() => void navigateSetupBack()}
+                        >
+                          上一步
+                        </button>
+                      )}
+                      <button
+                        className={
+                          setup.current_step === 1
+                            ? "primary-button setup-era-next"
+                            : setup.current_step === 15
+                              ? "primary-button setup-single-next"
+                              : "primary-button"
+                        }
+                        disabled={
+                          setupLoading !== null ||
+                          (
+                            !setupAnswer.trim()
+                            && setup.current_step !== 13
+                            && setup.current_step !== 17
+                          )
+                        }
+                        onClick={() => void submitSetupAnswer()}
+                      >
+                        {setupLoading === "answer"
+                          ? "保存中…"
+                          : setup.current_step === 1
+                            ? "以所选世代继续"
+                            : setup.current_step === 13 && !setupAnswer.trim()
+                              ? "不选择预设好友，继续"
+                              : setup.current_step === 17 && !setupAnswer.trim()
+                                ? "不再补充，继续"
+                                : "下一步"}
+                      </button>
+                    </div>
                   </>
                 ) : (
-                  <button
-                    className="primary-button"
-                    disabled={setupLoading}
-                    onClick={() => void confirmSetup()}
-                  >
-                    {setupLoading ? "确认中…" : "确认角色并开始"}
-                  </button>
+                  <div className="setup-navigation-actions">
+                    {setup.current_step > 1 && (
+                      <button
+                        className="secondary-button"
+                        disabled={setupLoading !== null}
+                        onClick={() => void navigateSetupBack()}
+                      >
+                        上一步
+                      </button>
+                    )}
+                    <button
+                      className="primary-button"
+                      disabled={setupLoading !== null}
+                      onClick={() => void confirmSetup()}
+                    >
+                      {setupLoading === "confirm"
+                        ? "确认中…"
+                        : setupLoading === "navigate"
+                          ? "返回中…"
+                          : "确认角色并开始"}
+                    </button>
+                  </div>
                 )}
               </div>
               <p className="setup-hint">

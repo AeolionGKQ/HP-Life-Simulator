@@ -18,7 +18,7 @@ from backend.app.models import (
     PlayerState,
     Relationship,
 )
-from backend.app.schemas.game import SetupAnswer, SetupView
+from backend.app.schemas.game import SetupAnswer, SetupNavigate, SetupView
 
 
 SETUP_FINAL_STEP = 18
@@ -83,6 +83,29 @@ def save_setup_answer(
     answers[str(payload.step)] = payload.answer
     if payload.step < SETUP_FINAL_STEP:
         setup["current_step"] = payload.step + 1
+    player_state.state = state
+    db.commit()
+    db.refresh(player_state)
+    return get_setup_view(game_session, player_state)
+
+
+def navigate_setup_step(
+    db: Session,
+    game_session: GameSession,
+    player_state: PlayerState,
+    payload: SetupNavigate,
+) -> SetupView:
+    state = deepcopy(player_state.state)
+    setup = state.setdefault("setup", {})
+    if setup.get("completed"):
+        raise ValueError("角色创建已经确认，不能返回修改")
+    current_step = int(setup.get("current_step", 1))
+    answers = setup.setdefault("answers", {})
+    if payload.step >= current_step:
+        raise ValueError("只能返回已经完成的角色创建步骤")
+    if str(payload.step) not in answers:
+        raise ValueError("该角色创建步骤尚未完成，不能返回")
+    setup["current_step"] = payload.step
     player_state.state = state
     db.commit()
     db.refresh(player_state)

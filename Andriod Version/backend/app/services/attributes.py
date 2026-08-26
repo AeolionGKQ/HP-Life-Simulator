@@ -8,6 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 import httpx
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -17,7 +18,7 @@ from backend.app.content.attributes import (
     RESOURCE_CATALOG,
     RESOURCE_IDS,
 )
-from backend.app.models import GameSession, PlayerState
+from backend.app.models import GameSession, JournalEntry, PlayerState, TurnRecord
 from backend.app.prompts.attributes import (
     ATTRIBUTE_INITIALIZATION_PROTOCOL,
     build_attribute_initialization_messages,
@@ -98,6 +99,9 @@ def _validate_and_apply(
         "completed_at": datetime.now(timezone.utc).isoformat(),
         "source": "llm_initialization",
         "error": None,
+        "adjustment_instruction": state.get(
+            "attribute_initialization", {}
+        ).get("adjustment_instruction", ""),
         "calibration_summary": response.calibration_summary,
         "initial_values": {
             "resources": [item.model_dump() for item in response.resources],
@@ -111,15 +115,35 @@ async def initialize_attributes(
     db: Session,
     game_session: GameSession,
     player_state: PlayerState,
+    *,
+    adjustment_instruction: str = "",
+    force: bool = False,
 ) -> dict[str, Any]:
     state = deepcopy(player_state.state)
     initialization = state.setdefault("attribute_initialization", {})
-    if initialization.get("status") == "ready":
+    if initialization.get("status") == "generating":
+        raise AttributeInitializationError("初始属性正在生成，请稍候")
+    if force and (
+        db.scalar(
+            select(TurnRecord.id)
+            .where(TurnRecord.session_id == game_session.id)
+            .limit(1)
+        )
+        or db.scalar(
+            select(JournalEntry.id)
+            .where(JournalEntry.session_id == game_session.id)
+            .limit(1)
+        )
+    ):
+        raise ValueError("已经开始剧情，不能重新生成初始属性")
+    if initialization.get("status") == "ready" and not force:
         game_session.status = "active"
         db.commit()
         return state
+    adjustment_instruction = adjustment_instruction.strip()
     initialization["status"] = "generating"
     initialization["request_id"] = f"attribute-init-{uuid4().hex[:12]}"
+    initialization["adjustment_instruction"] = adjustment_instruction
     player_state.state = state
     flag_modified(player_state, "state")
     db.commit()
@@ -128,7 +152,11 @@ async def initialize_attributes(
     provider = OpenAICompatibleProvider(get_settings().llm)
     try:
         raw = await provider.chat_completion(
-            build_attribute_initialization_messages(game_session, player_state)
+            build_attribute_initialization_messages(
+                game_session,
+                player_state,
+                adjustment_instruction=adjustment_instruction,
+            )
         )
         response = _parse_initialization(raw)
         state = _validate_and_apply(state, response)

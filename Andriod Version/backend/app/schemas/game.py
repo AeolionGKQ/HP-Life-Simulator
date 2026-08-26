@@ -39,8 +39,73 @@ class SetupAnswer(BaseModel):
     answer: Any
 
 
+class SetupNavigate(BaseModel):
+    step: int = Field(ge=1, le=17)
+
+
 class SetupConfirm(BaseModel):
     confirmed: bool = True
+
+
+class AttributeInitializationRequest(BaseModel):
+    adjustment_instruction: str = Field(default="", max_length=2000)
+    force: bool = False
+
+
+class StoryArcResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    response_type: Literal["story_arc"]
+    schema_version: Literal["1.0"] = "1.0"
+    title: str = Field(min_length=1, max_length=300)
+    summary: str = Field(min_length=1, max_length=6000)
+    # Keep list bounds out of Field metadata: Android embeds Pydantic 1.x,
+    # which rejects Pydantic 2's unenforced list ``max_length`` constraints
+    # while importing the model.
+    causal_chain: list[str] = Field(default_factory=list)
+    open_threads: list[str] = Field(default_factory=list)
+    key_characters: list[str] = Field(default_factory=list)
+    key_locations: list[str] = Field(default_factory=list)
+    keywords: list[str] = Field(default_factory=list)
+    important_turns: list[int] = Field(default_factory=list)
+    self_check: dict[str, Any] = {}
+
+
+class StoryArcJobRead(BaseModel):
+    id: str
+    status: Literal["pending", "generating", "ready", "failed"]
+    source_turn_start: int
+    source_turn_end: int
+    attempt: int
+    error: str | None = None
+    started_at: str | None = None
+    completed_at: str | None = None
+    created_at: str
+
+
+class StoryArcRead(BaseModel):
+    scope_key: str
+    status: Literal["ready"]
+    title: str
+    summary: str
+    causal_chain: list[Any] = []
+    open_threads: list[Any] = []
+    covered_turn_start: int | None = None
+    covered_turn_end: int | None = None
+    source_turn_ids: list[str] = []
+    key_characters: list[str] = []
+    key_locations: list[str] = []
+    keywords: list[str] = []
+    important_turns: list[int] = []
+    version: int
+    updated_at: str
+
+
+class StoryArcStatus(BaseModel):
+    mode: Literal["parallel", "queue"]
+    blocked: bool
+    active_job: StoryArcJobRead | None = None
+    latest_failed_job: StoryArcJobRead | None = None
 
 
 RESOURCE_ID = Literal["health", "mana", "sanity", "energy", "satiety"]

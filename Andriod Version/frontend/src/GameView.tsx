@@ -9,6 +9,8 @@ import {
   type PlayerChanges,
   type StoredTurn,
   type Relationship,
+  type StoryArc,
+  type StoryArcStatus,
   type TurnResult,
 } from "./api";
 
@@ -60,7 +62,13 @@ export function GameView({
   const [acknowledgingDeparture, setAcknowledgingDeparture] = useState(false);
   const [loading, setLoading] = useState(false);
   const [initializingAttributes, setInitializingAttributes] = useState(false);
+  const [attributeAdjustment, setAttributeAdjustment] = useState("");
+  const [attributeRegenerateOpen, setAttributeRegenerateOpen] = useState(false);
+  const [regeneratingAttributes, setRegeneratingAttributes] = useState(false);
   const [error, setError] = useState("");
+  const [storyArcs, setStoryArcs] = useState<StoryArc[]>([]);
+  const [storyArcStatus, setStoryArcStatus] = useState<StoryArcStatus | null>(null);
+  const [retryingStoryArc, setRetryingStoryArc] = useState(false);
 
   async function refreshState() {
     const [stateResponse, journalResponse, relationshipResponse, npcResponse, turnsResponse, coursesResponse] = await Promise.all([
@@ -132,6 +140,37 @@ export function GameView({
     };
   }, [sessionId]);
 
+  useEffect(() => {
+    if (activeMenu !== "记忆管理") return;
+    let active = true;
+    let pollInFlight = false;
+    async function pollStoryArcs() {
+      if (pollInFlight) return;
+      pollInFlight = true;
+      try {
+        const [status, arcs] = await Promise.all([
+          api.storyArcStatus(sessionId),
+          api.storyArcs(sessionId),
+        ]);
+        if (!active) return;
+        setStoryArcStatus(status);
+        setStoryArcs(arcs);
+      } catch (reason: unknown) {
+        if (active) {
+          setError(reason instanceof Error ? reason.message : "无法读取故事弧状态");
+        }
+      } finally {
+        pollInFlight = false;
+      }
+    }
+    void pollStoryArcs();
+    const timer = window.setInterval(() => void pollStoryArcs(), 2000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [sessionId, activeMenu]);
+
   async function submitAction(
     kind: "choice" | "free_text",
     choiceId?: string,
@@ -139,6 +178,7 @@ export function GameView({
   ) {
     if (
       (turnHistory.length > 0 && viewedTurnIndex !== turnHistory.length - 1)
+      || Boolean(storyArcStatus?.blocked)
       || courses?.course_selection?.status === "pending"
       || state?.school?.departure_notice?.status === "pending"
     ) return;
@@ -372,6 +412,24 @@ export function GameView({
             ))}
           </div>
         )}
+        {activeMenu === "记忆管理" && (
+          <StoryArcPanel
+            arcs={storyArcs}
+            status={storyArcStatus}
+            retrying={retryingStoryArc}
+            onRetry={async () => {
+              setRetryingStoryArc(true);
+              try {
+                await api.retryStoryArc(sessionId);
+                setStoryArcStatus(await api.storyArcStatus(sessionId));
+              } catch (reason) {
+                setError(reason instanceof Error ? reason.message : "故事弧重试失败");
+              } finally {
+                setRetryingStoryArc(false);
+              }
+            }}
+          />
+        )}
         {activeMenu === "羁绊" && (
           <div className="relationship-list">
             {relationshipRows.length === 0 ? <EmptyText text="你还没有与任何人建立足以记录的羁绊。" /> : relationshipRows.map((item) => (
@@ -470,7 +528,7 @@ export function GameView({
       setInitializingAttributes(true);
       setError("");
       try {
-        await api.initializeAttributes(sessionId);
+        await api.initializeAttributes(sessionId, "", true);
         await refreshState();
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : "初始属性生成失败");
@@ -498,6 +556,22 @@ export function GameView({
     );
   }
 
+  async function regenerateAttributes() {
+    if (regeneratingAttributes || turnHistory.length > 0 || journal.length > 0) return;
+    setRegeneratingAttributes(true);
+    setError("");
+    try {
+      await api.initializeAttributes(sessionId, attributeAdjustment.trim(), true);
+      await refreshState();
+      setAttributeAdjustment("");
+      setAttributeRegenerateOpen(false);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "初始属性重新生成失败");
+    } finally {
+      setRegeneratingAttributes(false);
+    }
+  }
+
   if (departureNoticePending) {
     return (
       <section className="game-panel" aria-label="退学通知">
@@ -519,6 +593,12 @@ export function GameView({
           <span className="empty-icon" aria-hidden="true"><BookOpenText /></span>
           <h3>这条世界线已经走到终点</h3>
           <p>生命值归零，角色故事已封存。你仍可以查看角色、纪事与已经留下的关系记录。</p>
+        </div>
+      ) : regeneratingAttributes ? (
+        <div className="magic-loading" role="status" aria-live="polite">
+          <div className="magic-orbit" aria-hidden="true"><MagicWand /></div>
+          <h3>命运正在重新校准你的魔法回响</h3>
+          <p>魔法世界正在根据你的调整重新测定初始属性，请稍候……</p>
         </div>
       ) : loading ? (
         <div className="magic-loading" role="status" aria-live="polite">
@@ -554,7 +634,34 @@ export function GameView({
               <p>{player.attribute_initialization?.calibration_summary || "你的初始资源与长期维度已经根据角色设定生成，并会在剧情中继续变化。"}</p>
               <ResourceSection resources={resources} />
               <DimensionSection dimensions={dimensions} />
-              <button className="primary-button" disabled={courseSelectionPending} onClick={() => void submitAction("choice", "start_story")}>
+              <div className="attribute-regenerate">
+                <button
+                  className="secondary-button"
+                  disabled={regeneratingAttributes || loading}
+                  onClick={() => setAttributeRegenerateOpen((current) => !current)}
+                >
+                  {attributeRegenerateOpen ? "收起调整说明" : "重新生成属性"}
+                </button>
+                {attributeRegenerateOpen && (
+                  <div className="attribute-regenerate-form">
+                    <textarea
+                      aria-label="属性调整说明"
+                      value={attributeAdjustment}
+                      onChange={(event) => setAttributeAdjustment(event.target.value)}
+                      placeholder="可选：告诉模型希望如何调整，例如“体质和意志稍高，魔力保持普通，不要让属性过于极端”。"
+                      maxLength={2000}
+                    />
+                    <button
+                      className="primary-button"
+                      disabled={regeneratingAttributes || loading}
+                      onClick={() => void regenerateAttributes()}
+                    >
+                      {regeneratingAttributes ? "正在重新生成…" : "确认重新生成"}
+                    </button>
+                  </div>
+                )}
+              </div>
+              <button className="primary-button" disabled={courseSelectionPending || regeneratingAttributes || loading} onClick={() => void submitAction("choice", "start_story")}>
                 踏入魔法世界
               </button>
             </div>
@@ -1333,6 +1440,57 @@ function getRomanceStage(state: Record<string, any>): string {
     "marriage",
     "married",
   ].includes(legacyStage) ? legacyStage : "none";
+}
+
+function StoryArcPanel({
+  arcs,
+  status,
+  retrying,
+  onRetry,
+}: {
+  arcs: StoryArc[];
+  status: StoryArcStatus | null;
+  retrying: boolean;
+  onRetry: () => Promise<void>;
+}) {
+  const failed = status?.latest_failed_job;
+  return (
+    <div className="story-arc-panel">
+      <div className="section-heading">
+        <div>
+          <span className="eyebrow">长期剧情记忆</span>
+          <h2>故事弧</h2>
+        </div>
+        {status?.active_job && <span className="state-pill">正在整理</span>}
+      </div>
+      {failed && (
+        <div className="config-message">
+          故事弧整理失败：{failed.error ?? "未知错误"}
+          <button className="secondary-button" type="button" onClick={() => void onRetry()} disabled={retrying}>
+            {retrying ? "重试中…" : "重试故事弧"}
+          </button>
+        </div>
+      )}
+      {arcs.length === 0 ? (
+        <EmptyText text={status?.active_job ? "旧剧情正在被整理成阶段性记忆。" : "暂时还没有完成的故事弧。"} />
+      ) : (
+        <div className="story-arc-list">
+          {arcs.map((arc) => (
+            <article className="story-arc-card" key={arc.scope_key}>
+              <span className="eyebrow">
+                第 {arc.covered_turn_start ?? "?"}—{arc.covered_turn_end ?? "?"} 个剧情节点
+              </span>
+              <h3>{arc.title}</h3>
+              <p>{arc.summary}</p>
+              {arc.open_threads.length > 0 && (
+                <small>未解决线索：{arc.open_threads.join("、")}</small>
+              )}
+            </article>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function EmptyText({ text }: { text: string }) {

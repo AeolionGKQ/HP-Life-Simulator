@@ -362,6 +362,27 @@ h3 { margin-bottom: 5px; font-size: 17px; font-weight: 560; }
 .empty-panel p,
 .first-scene p { max-width: 520px; margin-bottom: 22px; }
 
+.attribute-regenerate { width: min(100%, 620px); margin: 18px auto 12px; }
+.attribute-regenerate > .secondary-button { min-width: 160px; }
+.attribute-regenerate-form {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  width: 100%;
+  margin-top: 10px;
+}
+.attribute-regenerate-form textarea {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 92px;
+  resize: vertical;
+  font-family: var(--serif);
+  font-size: 13px;
+  line-height: 1.75;
+}
+.attribute-regenerate-form .primary-button { align-self: flex-end; min-width: 160px; }
+
 .era-start-actions { display: flex; gap: 9px; width: min(100%, 600px); margin: 4px auto 0; }
 .era-start-actions input { flex: 1; width: auto; }
 .era-start-button { min-width: 172px; }
@@ -430,10 +451,30 @@ textarea:focus { border-color: var(--accent); background: #101610; outline: 0; }
 .setup-option small { margin-top: 6px; color: var(--muted); font: 11px/1.55 var(--sans); }
 .setup-option .unavailable-note { color: var(--danger); }
 
-.setup-input-row { display: flex; gap: 9px; }
-.setup-input-row > input { flex: 1; width: auto; min-height: 48px; }
-.setup-input-row textarea { flex: 1; width: auto; min-height: 96px; resize: vertical; font-family: var(--serif); font-size: 13px; line-height: 1.75; }
-.setup-input-row .primary-button { align-self: stretch; }
+.setup-input-row { display: grid; gap: 12px; margin-top: 18px; }
+.setup-answer-field { width: 100%; }
+.setup-answer-field > input,
+.setup-answer-field > textarea {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+}
+.setup-answer-field > input { min-height: 48px; }
+.setup-answer-field > textarea {
+  min-height: 96px;
+  resize: vertical;
+  font-family: var(--serif);
+  font-size: 13px;
+  line-height: 1.75;
+}
+.setup-navigation-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  width: min(100%, 220px);
+  margin-left: auto;
+}
+.setup-navigation-actions > button { width: 100%; min-height: 48px; }
 .setup-era-next { min-width: 200px; min-height: 48px; margin-left: auto; }
 .setup-single-next { min-width: 160px; min-height: 48px; margin-left: auto; }
 .setup-hint { margin-top: 13px; color: var(--muted-dark); font: 10px/1.75 var(--sans); }
@@ -634,6 +675,17 @@ textarea:focus { border-color: var(--accent); background: #101610; outline: 0; }
 .journal-entry h3 { margin-bottom: 4px; }
 .journal-entry p { margin: 0; color: var(--muted); font: 12px/1.7 var(--sans); }
 .journal-sequence { color: var(--accent); font: 650 12px var(--sans); }
+.story-arc-panel { display: grid; gap: 16px; }
+.story-arc-list { display: grid; gap: 9px; }
+.story-arc-card {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-raised);
+}
+.story-arc-card h3 { margin: 8px 0 6px; }
+.story-arc-card p { margin: 0; color: var(--text-soft); font: 12px/1.8 var(--sans); }
+.story-arc-card small { display: block; margin-top: 10px; color: var(--muted); font: 10px/1.65 var(--sans); }
 .relationship-row { align-items: center; justify-content: space-between; flex-wrap: wrap; }
 .relationship-row strong,
 .relationship-row small { display: block; }
@@ -769,6 +821,8 @@ textarea:focus { border-color: var(--accent); background: #101610; outline: 0; }
   .reshape-fate-form { padding: 16px; }
   .reshape-fate-actions { align-items: stretch; flex-direction: column-reverse; }
   .reshape-fate-actions button { width: 100%; }
+  .attribute-regenerate { width: 100%; }
+  .attribute-regenerate-form .primary-button { width: 100%; }
   .fate-intervention-form { padding: 16px; }
   .fate-intervention-actions { align-items: stretch; flex-direction: column-reverse; }
   .fate-intervention-actions button { width: 100%; }
@@ -777,13 +831,12 @@ textarea:focus { border-color: var(--accent); background: #101610; outline: 0; }
   .first-scene { min-height: 320px; padding-inline: 0; }
   .era-start-actions,
   .free-text-choice,
-  .setup-input-row,
   .modal-actions { flex-direction: column; }
   .era-start-actions input,
-  .free-text-choice input,
-  .setup-input-row textarea { width: 100%; }
+  .free-text-choice input { width: 100%; }
   .era-start-button,
   .setup-era-next { width: 100%; min-width: 0; min-height: 46px; }
+  .setup-navigation-actions { width: 100%; }
   .setup-option-group > div,
   .setup-summary { grid-template-columns: 1fr; }
   .status-grid { grid-template-columns: repeat(2, 1fr); }

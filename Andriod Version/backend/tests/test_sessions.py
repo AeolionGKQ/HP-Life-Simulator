@@ -345,6 +345,55 @@ def test_setup_requires_current_step() -> None:
             assert invalid_birthday.json()["detail"] == "请选择有效的生日日期"
 
 
+def test_setup_can_navigate_back_and_edit_a_completed_step() -> None:
+    with TestClient(create_app()) as client:
+        session_id = client.post(
+            "/api/sessions",
+            json={"name": "角色创建翻页测试"},
+        ).json()["id"]
+        answers = {
+            1: "second_generation",
+            2: "旧名字",
+            3: "女",
+        }
+        for step, answer in answers.items():
+            response = client.post(
+                f"/api/sessions/{session_id}/setup/answer",
+                json={"step": step, "answer": answer},
+            )
+            assert response.status_code == 200
+
+        navigated = client.post(
+            f"/api/sessions/{session_id}/setup/navigate",
+            json={"step": 2},
+        )
+        assert navigated.status_code == 200
+        assert navigated.json()["current_step"] == 2
+        assert navigated.json()["answers"]["2"] == "旧名字"
+
+        edited = client.post(
+            f"/api/sessions/{session_id}/setup/answer",
+            json={"step": 2, "answer": "新名字"},
+        )
+        assert edited.status_code == 200
+        assert edited.json()["current_step"] == 3
+        assert edited.json()["answers"]["2"] == "新名字"
+        assert edited.json()["answers"]["3"] == "女"
+
+        cannot_go_forward = client.post(
+            f"/api/sessions/{session_id}/setup/navigate",
+            json={"step": 3},
+        )
+        assert cannot_go_forward.status_code == 409
+
+        first_step = client.post(
+            f"/api/sessions/{session_id}/setup/navigate",
+            json={"step": 1},
+        )
+        assert first_step.status_code == 200
+        assert first_step.json()["current_step"] == 1
+
+
 def test_setup_academy_only_accepts_four_choices() -> None:
     with TestClient(create_app()) as client:
         session_id = client.post(
@@ -510,6 +559,125 @@ def test_setup_materializes_npcs_and_state() -> None:
         assert relationships.status_code == 200
         assert len(npcs.json()) >= 9
         assert len(relationships.json()) >= 9
+
+
+def test_ready_attributes_can_be_regenerated_before_story_and_not_after(
+    monkeypatch,
+) -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    async def fake_regeneration(self, messages):
+        calls.append(messages)
+        return {
+            "choices": [{
+                "message": {
+                    "content": """{
+                      "response_type": "attribute_initialization",
+                      "schema_version": "1.2",
+                      "resources": [
+                        {"id": "health", "value": 90, "max": 100, "reason": "重生成"},
+                        {"id": "mana", "value": 90, "max": 100, "reason": "重生成"},
+                        {"id": "sanity", "value": 90, "max": 100, "reason": "重生成"},
+                        {"id": "energy", "value": 90, "max": 100, "reason": "重生成"},
+                        {"id": "satiety", "value": 90, "max": 100, "reason": "重生成"}
+                      ],
+                      "dimensions": [
+                        {"id": "constitution", "value": 14, "max": 20, "reason": "重生成"},
+                        {"id": "intelligence", "value": 10, "max": 20, "reason": "重生成"},
+                        {"id": "willpower", "value": 13, "max": 20, "reason": "重生成"},
+                        {"id": "charisma", "value": 10, "max": 20, "reason": "重生成"},
+                        {"id": "magical_power", "value": 10, "max": 20, "reason": "重生成"}
+                      ],
+                      "calibration_summary": "按偏好重新生成",
+                      "self_check": {}
+                    }"""
+                }
+            }]
+        }
+
+    monkeypatch.setattr(
+        OpenAICompatibleProvider,
+        "chat_completion",
+        fake_regeneration,
+    )
+
+    with TestClient(create_app()) as client:
+        session_id = client.post(
+            "/api/sessions",
+            json={"name": "初始属性重生成测试"},
+        ).json()["id"]
+        for step in range(1, 18):
+            response = client.post(
+                f"/api/sessions/{session_id}/setup/answer",
+                json={
+                    "step": step,
+                    "answer": (
+                        "second_generation"
+                        if step == 1
+                        else "1980-03-12"
+                        if step == 4
+                        else "before_first_letter"
+                        if step == 14
+                        else "gryffindor"
+                        if step == 15
+                        else f"answer-{step}"
+                    ),
+                },
+            )
+            assert response.status_code == 200
+
+        confirmed = client.post(
+            f"/api/sessions/{session_id}/setup/confirm",
+            json={"confirmed": True},
+        )
+        assert confirmed.status_code == 200
+        assert len(calls) == 1
+
+        before = client.get(f"/api/sessions/{session_id}").json()
+        regenerated = client.post(
+            f"/api/sessions/{session_id}/attributes/initialize",
+            json={
+                "adjustment_instruction": "体质和意志稍高，魔力保持普通",
+                "force": True,
+            },
+        )
+        assert regenerated.status_code == 200, regenerated.text
+        assert len(calls) == 2
+        assert "体质和意志稍高" in calls[-1][1]["content"]
+        assert regenerated.json()["attribute_initialization"]["adjustment_instruction"] == (
+            "体质和意志稍高，魔力保持普通"
+        )
+        state = client.get(f"/api/sessions/{session_id}/state").json()
+        assert state["state"]["dimensions"]["constitution"]["value"] == 14
+        assert state["state"]["attribute_initialization"]["status"] == "ready"
+        assert client.get(f"/api/sessions/{session_id}").json()["state_version"] == (
+            before["state_version"] + 1
+        )
+
+        cannot_navigate = client.post(
+            f"/api/sessions/{session_id}/setup/navigate",
+            json={"step": 1},
+        )
+        assert cannot_navigate.status_code == 409
+
+        with get_session_factory()() as db:
+            db.add(
+                JournalEntry(
+                    session_id=session_id,
+                    entry_type="story",
+                    title="已经开始的故事",
+                    summary="属性重生成不应覆盖已经开始的剧情。",
+                )
+            )
+            db.commit()
+
+        blocked = client.post(
+            f"/api/sessions/{session_id}/attributes/initialize",
+            json={"adjustment_instruction": "继续提高体质", "force": True},
+        )
+        assert blocked.status_code == 409
+        assert "已经开始剧情" in blocked.json()["detail"]
+        assert len(calls) == 2
 
 
 def test_setup_initial_friends_and_sorting_start() -> None:

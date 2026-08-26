@@ -206,3 +206,75 @@ class StorySummary(Base):
         DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False
     )
 
+
+class StoryArc(Base):
+    __tablename__ = "story_arcs"
+    __table_args__ = (
+        Index("ix_story_arc_session_scope_key", "session_id", "scope_key", unique=True),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    session_id: Mapped[str] = mapped_column(String(36), ForeignKey("game_sessions.id"))
+    scope_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="ready", nullable=False)
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    causal_chain: Mapped[list[Any]] = mapped_column(
+        JSON, default=empty_list, nullable=False
+    )
+    open_threads: Mapped[list[Any]] = mapped_column(
+        JSON, default=empty_list, nullable=False
+    )
+    key_characters: Mapped[list[Any]] = mapped_column(
+        JSON, default=empty_list, nullable=False
+    )
+    key_locations: Mapped[list[Any]] = mapped_column(
+        JSON, default=empty_list, nullable=False
+    )
+    keywords: Mapped[list[Any]] = mapped_column(
+        JSON, default=empty_list, nullable=False
+    )
+    important_turns: Mapped[list[Any]] = mapped_column(
+        JSON, default=empty_list, nullable=False
+    )
+    source_turn_ids: Mapped[list[Any]] = mapped_column(
+        JSON, default=empty_list, nullable=False
+    )
+    covered_turn_start: Mapped[int | None] = mapped_column(Integer)
+    covered_turn_end: Mapped[int | None] = mapped_column(Integer)
+    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False
+    )
+
+
+class StoryArcGenerationJob(Base):
+    __tablename__ = "story_arc_generation_jobs"
+    __table_args__ = (
+        Index(
+            "ix_story_arc_job_session_range",
+            "session_id",
+            "source_turn_start",
+            "source_turn_end",
+            unique=True,
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    session_id: Mapped[str] = mapped_column(String(36), ForeignKey("game_sessions.id"))
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
+    request_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    source_turn_start: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_turn_end: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_turn_ids: Mapped[list[Any]] = mapped_column(
+        JSON, default=empty_list, nullable=False
+    )
+    source_state_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    attempt: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    error: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+

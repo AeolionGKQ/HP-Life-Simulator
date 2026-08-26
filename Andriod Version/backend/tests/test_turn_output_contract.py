@@ -8,7 +8,8 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from backend.app.prompts.turn import build_turn_messages
+from backend.app.compat import HTTPException
+from backend.app.prompts.turn import _recent_turns_to_context, build_turn_messages
 from backend.app.schemas.game import (
     ActionRequest,
     Choice,
@@ -17,8 +18,11 @@ from backend.app.schemas.game import (
     NarrativeResponse,
 )
 from backend.app.services.turns import (
+    _action_text,
+    _build_action,
     _normalize_memory_importance,
     _request_response,
+    _resolve_selected_choice,
 )
 
 
@@ -31,7 +35,12 @@ def _extract_json_template(system_prompt: str, name: str) -> dict[str, Any]:
     return json.loads(template.strip())
 
 
-def _build_messages(state: dict[str, Any] | None = None) -> list[dict[str, str]]:
+def _build_messages(
+    state: dict[str, Any] | None = None,
+    *,
+    action: dict[str, Any] | None = None,
+    recent_turns: list[Any] | None = None,
+) -> list[dict[str, str]]:
     return build_turn_messages(
         game_session=SimpleNamespace(
             id="session-1",
@@ -42,10 +51,10 @@ def _build_messages(state: dict[str, Any] | None = None) -> list[dict[str, str]]
         player_state=SimpleNamespace(state=state or {}),
         npcs=[],
         relationships=[],
-        recent_turns=[],
+        recent_turns=recent_turns or [],
         memories=[],
         summaries=[],
-        action={"kind": "choice", "choice_id": "start_story"},
+        action=action or {"kind": "choice", "choice_id": "start_story"},
     )
 
 
@@ -106,6 +115,192 @@ def test_turn_system_prompt_contains_parseable_response_templates() -> None:
     assert "每轮最多创建一个新 NPC" in system_prompt
     assert "NPC 年龄未知" in system_prompt
     assert "committed、adult_stage 和 marriage" in system_prompt
+    assert "player_action.selected_choice" in system_prompt
+    assert "不要把一个 choice_id 推测成另一个选项" in system_prompt
+    assert "顶部界面已经单独显示当前日期和地点" in system_prompt
+    assert "不要每轮使用" in system_prompt
+    assert "narrative 必须是本回合完整、连贯、可读的剧情正文" in system_prompt
+    assert "不要机械套用固定的开场" in system_prompt
+    assert "重要事件不能为了节省字数被过度压缩" in system_prompt
+    assert "recent_turns.state_changes 是程序已经实际应用的历史状态变化" in system_prompt
+    assert "不能机械复制旧理由" in system_prompt
+
+
+def test_choice_id_is_resolved_to_the_previous_turn_choice() -> None:
+    payload = ActionRequest(
+        client_action_id="action-1",
+        expected_state_version=2,
+        kind="choice",
+        choice_id="choice_2",
+    )
+    latest = SimpleNamespace(
+        llm_response={
+            "choices": [
+                {
+                    "id": "choice_1",
+                    "label": "跑去山谷找布丽安娜",
+                    "kind": "action",
+                    "risk": "low",
+                },
+                {
+                    "id": "choice_2",
+                    "label": "拆开信封认真读一遍录取说明",
+                    "kind": "action",
+                    "risk": "medium",
+                },
+                {
+                    "id": "choice_other",
+                    "label": "其他",
+                    "kind": "free_text",
+                    "risk": "low",
+                },
+            ]
+        }
+    )
+
+    selected = _resolve_selected_choice(payload, latest)
+    assert selected is not None
+    assert selected["id"] == "choice_2"
+    assert selected["label"] == "拆开信封认真读一遍录取说明"
+    assert _action_text(payload, selected) == "choice_2 拆开信封认真读一遍录取说明"
+    assert _build_action(payload, selected)["instruction"] == (
+        "玩家明确选择了：拆开信封认真读一遍录取说明"
+    )
+
+
+def test_invalid_choice_id_is_rejected_before_model_generation() -> None:
+    payload = ActionRequest(
+        client_action_id="action-2",
+        expected_state_version=2,
+        kind="choice",
+        choice_id="choice_old",
+    )
+    latest = SimpleNamespace(
+        llm_response={
+            "choices": [
+                {
+                    "id": "choice_1",
+                    "label": "观察周围",
+                    "kind": "action",
+                    "risk": "low",
+                },
+            ]
+        }
+    )
+
+    with pytest.raises(HTTPException) as error:
+        _resolve_selected_choice(payload, latest)
+    assert error.value.status_code == 409
+
+
+def test_start_story_and_free_text_keep_their_special_action_semantics() -> None:
+    start_payload = ActionRequest(
+        client_action_id="action-3",
+        expected_state_version=0,
+        kind="choice",
+        choice_id="start_story",
+    )
+    start_choice = _resolve_selected_choice(start_payload, None)
+    assert start_choice is not None
+    assert start_choice["label"] == "踏入魔法世界"
+    with pytest.raises(HTTPException) as start_error:
+        _resolve_selected_choice(start_payload, SimpleNamespace(llm_response={}))
+    assert start_error.value.status_code == 409
+
+    free_text_payload = ActionRequest(
+        client_action_id="action-4",
+        expected_state_version=2,
+        kind="free_text",
+        choice_id="choice_other",
+        free_text="去找父母",
+    )
+    assert _resolve_selected_choice(free_text_payload, None) is None
+    assert _action_text(free_text_payload) == "choice_other 去找父母"
+
+
+def test_recent_turn_context_only_repeats_scene_metadata_when_it_changes() -> None:
+    def turn(
+        sequence: int,
+        current_date: str,
+        location_id: str,
+        location_name: str,
+        state_changes: dict[str, Any] | None = None,
+    ) -> Any:
+        return SimpleNamespace(
+            sequence=sequence,
+            action={"kind": "choice", "choice_id": f"choice_{sequence}"},
+            narrative=f"第 {sequence} 轮正文",
+            llm_response={
+                "turn": {
+                    "title": f"节点 {sequence}",
+                    "scene_type": "dialogue",
+                    "current_date": current_date,
+                    "location_id": location_id,
+                    "location_name": location_name,
+                }
+            },
+            memory_update={},
+            authoritative_changes={"visible": state_changes or {}},
+        )
+
+    contexts = _recent_turns_to_context(
+        [
+            turn(
+                1,
+                "1991-07-01",
+                "home",
+                "维洛拉家族古堡",
+                {
+                    "relationship_deltas": [
+                        {
+                            "npc_id": "ivy_moore",
+                            "affinity_delta": -2,
+                            "trust_delta": -1,
+                            "reason": "连续忽视她的提醒",
+                            "evidence": "本轮对话中再次打断了她",
+                        }
+                    ]
+                },
+            ),
+            turn(2, "1991-07-01", "home", "维洛拉家族古堡"),
+            turn(3, "1991-07-01", "dragon_valley", "龙谷"),
+        ]
+    )
+
+    assert contexts[0]["scene_date"] == "1991-07-01"
+    assert contexts[0]["scene_location_id"] == "home"
+    assert contexts[0]["state_changes"]["relationship_deltas"][0]["reason"] == (
+        "连续忽视她的提醒"
+    )
+    assert "scene_date" not in contexts[1]
+    assert "scene_location_id" not in contexts[1]
+    assert contexts[2]["scene_location_id"] == "dragon_valley"
+    assert contexts[2]["scene_location_name"] == "龙谷"
+
+
+def test_selected_choice_is_present_in_the_model_context() -> None:
+    payload = ActionRequest(
+        client_action_id="action-5",
+        expected_state_version=2,
+        kind="choice",
+        choice_id="choice_1",
+    )
+    selected = {
+        "id": "choice_1",
+        "label": "认真读完录取说明",
+        "kind": "action",
+        "risk": "low",
+        "requires": [],
+        "effects_hint": "",
+        "effects": {"gains": [], "losses": [], "note": ""},
+    }
+    messages = _build_messages(action=_build_action(payload, selected))
+    context = json.loads(messages[1]["content"].split("\n", 1)[1])
+
+    assert context["player_action"]["selected_choice"]["label"] == "认真读完录取说明"
+    assert context["player_action"]["instruction"] == "玩家明确选择了：认真读完录取说明"
+    assert "timeline" not in context
+    assert context["player_state"].get("current_context", {}) == {}
 
 
 def test_custom_origin_uses_reasoned_magic_world_knowledge_rule() -> None:
@@ -302,6 +497,8 @@ def test_turn_context_contains_layered_generation_background() -> None:
     assert "南瓜汁的甜腻" in generation["era_frame"]["core_atmosphere"]
     assert generation["mainline_phase"]["id"] == "letter_and_enrollment"
     assert generation["timeline_phase"]["phase_id"] == "pre_enrollment_summer"
+    assert "calendar_date" not in generation["timeline_phase"]
+    assert "calendar_year" not in generation["timeline_phase"]
     assert generation["freedom_rules"]
     assert generation["worldline_pressure"]["offset_rate"] == 0
     assert "worldline_rule" in generation["worldline_pressure"]

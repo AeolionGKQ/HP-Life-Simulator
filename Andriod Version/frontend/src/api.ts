@@ -262,6 +262,43 @@ export interface StoredTurn {
   created_at: string;
 }
 
+export interface StoryArc {
+  scope_key: string;
+  status: "ready";
+  title: string;
+  summary: string;
+  causal_chain: unknown[];
+  open_threads: unknown[];
+  covered_turn_start: number | null;
+  covered_turn_end: number | null;
+  source_turn_ids: string[];
+  key_characters: string[];
+  key_locations: string[];
+  keywords: string[];
+  important_turns: number[];
+  version: number;
+  updated_at: string;
+}
+
+export interface StoryArcJob {
+  id: string;
+  status: "pending" | "generating" | "ready" | "failed";
+  source_turn_start: number;
+  source_turn_end: number;
+  attempt: number;
+  error: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+}
+
+export interface StoryArcStatus {
+  mode: "parallel" | "queue";
+  blocked: boolean;
+  active_job: StoryArcJob | null;
+  latest_failed_job: StoryArcJob | null;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     headers: { "Content-Type": "application/json" },
@@ -383,6 +420,17 @@ export const api = {
           method: "POST",
           body: JSON.stringify({ step, answer }),
         }),
+  navigateSetup: (id: string, step: number) =>
+    isAndroidNative()
+      ? requestPython<SetupView>(
+          `/api/sessions/${id}/setup/navigate`,
+          "POST",
+          JSON.stringify({ step }),
+        )
+      : request<SetupView>(`/api/sessions/${id}/setup/navigate`, {
+          method: "POST",
+          body: JSON.stringify({ step }),
+        }),
   confirmSetup: (id: string) =>
     isAndroidNative()
       ? requestPython<SetupView>(`/api/sessions/${id}/setup/confirm`, "POST", JSON.stringify({ confirmed: true }))
@@ -390,11 +438,22 @@ export const api = {
           method: "POST",
           body: JSON.stringify({ confirmed: true }),
         }),
-  initializeAttributes: (id: string) =>
+  initializeAttributes: (id: string, adjustmentInstruction = "", force = false) =>
     isAndroidNative()
-      ? requestPython<SetupView>(`/api/sessions/${id}/attributes/initialize`, "POST")
+      ? requestPython<SetupView>(
+          `/api/sessions/${id}/attributes/initialize`,
+          "POST",
+          JSON.stringify({
+            adjustment_instruction: adjustmentInstruction,
+            force,
+          }),
+        )
       : request<SetupView>(`/api/sessions/${id}/attributes/initialize`, {
           method: "POST",
+          body: JSON.stringify({
+            adjustment_instruction: adjustmentInstruction,
+            force,
+          }),
         }),
   state: (id: string) =>
     isAndroidNative()
@@ -440,6 +499,18 @@ export const api = {
     isAndroidNative()
       ? requestPython<StoredTurn[]>(`/api/sessions/${id}/turns`)
       : request<StoredTurn[]>(`/api/sessions/${id}/turns`),
+  storyArcs: (id: string) =>
+    isAndroidNative()
+      ? requestPython<StoryArc[]>(`/api/sessions/${id}/story-arcs`)
+      : request<StoryArc[]>(`/api/sessions/${id}/story-arcs`),
+  storyArcStatus: (id: string) =>
+    isAndroidNative()
+      ? requestPython<StoryArcStatus>(`/api/sessions/${id}/story-arcs/status`)
+      : request<StoryArcStatus>(`/api/sessions/${id}/story-arcs/status`),
+  retryStoryArc: (id: string) =>
+    isAndroidNative()
+      ? requestPython<StoryArcJob>(`/api/sessions/${id}/story-arcs/retry`, "POST")
+      : request<StoryArcJob>(`/api/sessions/${id}/story-arcs/retry`, { method: "POST" }),
   action: (
     id: string,
     payload: {
