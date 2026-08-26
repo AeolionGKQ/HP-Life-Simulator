@@ -1,4 +1,5 @@
 import json
+from uuid import uuid4
 
 from fastapi.testclient import TestClient
 import pytest
@@ -76,6 +77,98 @@ def test_create_and_read_session() -> None:
         assert "resources" in detail.json()["player_state"]
         assert "dimensions" in detail.json()["player_state"]
         assert "attributes" not in detail.json()["player_state"]
+
+
+def test_export_and_import_session_round_trip() -> None:
+    with TestClient(create_app()) as client:
+        created = client.post("/api/sessions", json={"name": "可携带的魔法人生"})
+        assert created.status_code == 201
+        source_id = created.json()["id"]
+
+        with get_session_factory()() as db:
+            player_state = db.scalar(
+                select(PlayerState).where(PlayerState.session_id == source_id)
+            )
+            assert player_state is not None
+            state = dict(player_state.state)
+            state["identity"] = {"name": "艾琳·格雷"}
+            player_state.state = state
+            turn = TurnRecord(
+                session_id=source_id,
+                sequence=1,
+                client_action_id=f"export-test-action-{uuid4()}",
+                action_type="start_story",
+                action={"kind": "start_story"},
+                response_type="narrative",
+                narrative="一封信在窗台上等待。",
+                llm_response={"turn": {"title": "来信"}},
+                proposed_changes={},
+                authoritative_changes={"visible": {"resource_deltas": []}},
+                memory_update={"summary": "收到入学来信"},
+                worldline={"offset_rate": 0},
+                state_version_before=0,
+                state_version_after=1,
+            )
+            db.add(turn)
+            db.flush()
+            db.add(
+                JournalEntry(
+                    session_id=source_id,
+                    turn_id=turn.id,
+                    entry_type="story",
+                    title="来信",
+                    summary="收到入学来信",
+                    data={},
+                )
+            )
+            db.commit()
+
+        exported = client.get(f"/api/sessions/{source_id}/export")
+        assert exported.status_code == 200
+        export_payload = exported.json()
+        assert export_payload["schema_version"] == "1.0"
+        assert export_payload["session"]["id"] == source_id
+        assert len(export_payload["turns"]) == 1
+        assert len(export_payload["journal_entries"]) == 1
+        export_payload["story_arcs"] = [{
+            "scope_key": "arc-0001-0025",
+            "status": "ready",
+            "title": "第一阶段",
+            "summary": "前二十五个节点的阶段摘要。",
+            "causal_chain": ["收到入学来信"],
+            "open_threads": ["等待入学通知"],
+            "key_characters": [],
+            "key_locations": ["家中"],
+            "keywords": ["入学"],
+            "important_turns": [1],
+            "source_turn_ids": [],
+            "covered_turn_start": 1,
+            "covered_turn_end": 25,
+            "version": 1,
+            "updated_at": "2026-08-26T00:00:00+00:00",
+        }]
+
+        imported = client.post("/api/sessions/import", json=export_payload)
+        assert imported.status_code == 201
+        imported_session = imported.json()
+        assert imported_session["id"] != source_id
+        assert imported_session["name"] == "可携带的魔法人生（导入）"
+
+        detail = client.get(f"/api/sessions/{imported_session['id']}")
+        assert detail.status_code == 200
+        assert detail.json()["player_state"]["identity"]["name"] == "艾琳·格雷"
+
+        turns = client.get(f"/api/sessions/{imported_session['id']}/turns")
+        assert turns.status_code == 200
+        assert turns.json()[0]["narrative"] == "一封信在窗台上等待。"
+        journal = client.get(f"/api/sessions/{imported_session['id']}/journal")
+        assert journal.status_code == 200
+        assert journal.json()[0]["summary"] == "收到入学来信"
+        story_arcs = client.get(
+            f"/api/sessions/{imported_session['id']}/story-arcs"
+        )
+        assert story_arcs.status_code == 200
+        assert story_arcs.json()[0]["title"] == "第一阶段"
 
 
 def test_origin_setup_options_have_three_preset_descriptions() -> None:

@@ -1,7 +1,15 @@
 package com.hpsimulator.app;
 
+import android.app.Activity;
+import android.content.Intent;
+import android.net.Uri;
 import android.util.Log;
 
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -12,11 +20,15 @@ import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
+import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import androidx.activity.result.ActivityResult;
 
 @CapacitorPlugin(name = "PythonBridge")
 public class PythonBridgePlugin extends Plugin {
     private static final Object PYTHON_START_LOCK = new Object();
+    private static final int FILE_PICKER_REQUEST = 4101;
+    private static final int FILE_SAVER_REQUEST = 4102;
     private final ExecutorService pythonExecutor = Executors.newCachedThreadPool();
 
     private void ensurePythonStarted() {
@@ -92,6 +104,90 @@ public class PythonBridgePlugin extends Plugin {
                     : "本地 Python 请求失败：" + detail,
                 exception
             );
+        }
+    }
+
+    @PluginMethod
+    public void pickFile(PluginCall call) {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/json");
+        startActivityForResult(call, intent, "handlePickFile");
+    }
+
+    @ActivityCallback
+    private void handlePickFile(PluginCall call, ActivityResult result) {
+        if (result == null || result.getResultCode() != Activity.RESULT_OK || result.getData() == null) {
+            call.reject("已取消读取存档");
+            return;
+        }
+        Uri uri = result.getData().getData();
+        if (uri == null) {
+            call.reject("未选择存档文件");
+            return;
+        }
+        try (InputStream input = getContext().getContentResolver().openInputStream(uri);
+             BufferedReader reader = new BufferedReader(
+                 new InputStreamReader(input, StandardCharsets.UTF_8))) {
+            StringBuilder content = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                content.append(line).append('\n');
+            }
+            JSObject response = new JSObject();
+            response.put("content", content.toString());
+            response.put("filename", uri.getLastPathSegment() == null ? "存档.json" : uri.getLastPathSegment());
+            response.put("uri", uri.toString());
+            call.resolve(response);
+        } catch (Exception exception) {
+            call.reject("无法读取存档文件", exception);
+        }
+    }
+
+    @PluginMethod
+    public void saveFile(PluginCall call) {
+        String filename = call.getString("filename", "霍格沃兹存档.hp-save.json");
+        String content = call.getString("content");
+        if (content == null) {
+            call.reject("导出存档内容为空");
+            return;
+        }
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/json");
+        intent.putExtra(Intent.EXTRA_TITLE, filename);
+        saveCallContent = content;
+        startActivityForResult(call, intent, "handleSaveFile");
+    }
+
+    private String saveCallContent;
+
+    @ActivityCallback
+    private void handleSaveFile(PluginCall call, ActivityResult result) {
+        String content = saveCallContent;
+        saveCallContent = null;
+        if (result == null || result.getResultCode() != Activity.RESULT_OK || result.getData() == null) {
+            call.reject("已取消导出存档");
+            return;
+        }
+        Uri uri = result.getData().getData();
+        if (uri == null || content == null) {
+            call.reject("未选择存档保存位置");
+            return;
+        }
+        try (OutputStream output = getContext().getContentResolver().openOutputStream(uri)) {
+            if (output == null) {
+                call.reject("无法打开存档保存位置");
+                return;
+            }
+            output.write(content.getBytes(StandardCharsets.UTF_8));
+            output.flush();
+            JSObject response = new JSObject();
+            response.put("saved", true);
+            response.put("uri", uri.toString());
+            call.resolve(response);
+        } catch (Exception exception) {
+            call.reject("无法写入存档文件", exception);
         }
     }
 }

@@ -47,6 +47,20 @@ export interface SessionDetail extends GameSession {
   player_state: Record<string, unknown>;
 }
 
+export interface SaveExport {
+  schema_version: "1.0";
+  exported_at: string;
+  session: GameSession;
+  player_state: Record<string, any>;
+  npc_states: Array<Record<string, any>>;
+  relationships: Array<Record<string, any>>;
+  turns: Array<Record<string, any>>;
+  journal_entries: Array<Record<string, any>>;
+  long_term_memories: Array<Record<string, any>>;
+  story_summaries: Array<Record<string, any>>;
+  story_arcs: Array<Record<string, any>>;
+}
+
 export interface SetupOption {
   id: string;
   label: string;
@@ -379,6 +393,17 @@ export const api = {
   sessions: () => isAndroidNative()
     ? requestPython<GameSession[]>("/api/sessions")
     : request<GameSession[]>("/api/sessions"),
+  exportSession: (id: string) =>
+    isAndroidNative()
+      ? requestPython<SaveExport>(`/api/sessions/${id}/export`)
+      : request<SaveExport>(`/api/sessions/${id}/export`),
+  importSession: (payload: SaveExport) =>
+    isAndroidNative()
+      ? requestPython<GameSession>("/api/sessions/import", "POST", JSON.stringify(payload))
+      : request<GameSession>("/api/sessions/import", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        }),
   createSession: (name: string) =>
     isAndroidNative()
       ? requestPython<GameSession>("/api/sessions", "POST", JSON.stringify({ name }))

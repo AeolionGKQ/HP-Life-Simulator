@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import {
   Archive,
   BookOpenText,
+  DownloadSimple,
   Envelope,
   GearSix,
   GitBranch,
@@ -15,6 +16,7 @@ import {
   Sparkle,
   Star,
   Trash,
+  UploadSimple,
   User,
   UsersThree,
   WifiHigh,
@@ -27,9 +29,11 @@ import {
   type GameSession,
   type HealthResponse,
   type LLMConfigStatus,
+  type SaveExport,
   type SetupView,
 } from "./api";
 import { GameView } from "./GameView";
+import { isAndroidNative, pickTextFile, saveTextFile } from "./pythonBridge";
 
 const menuItems = [
   { label: "剧情", icon: BookOpenText },
@@ -89,6 +93,34 @@ export function App() {
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [saveManaging, setSaveManaging] = useState(false);
+  const [saveNotice, setSaveNotice] = useState("");
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const saveNoticeTimerRef = useRef<number | null>(null);
+
+  function dismissSaveNotice() {
+    if (saveNoticeTimerRef.current !== null) {
+      window.clearTimeout(saveNoticeTimerRef.current);
+      saveNoticeTimerRef.current = null;
+    }
+    setSaveNotice("");
+  }
+
+  function showSaveNotice(message: string) {
+    if (saveNoticeTimerRef.current !== null) {
+      window.clearTimeout(saveNoticeTimerRef.current);
+    }
+    setSaveNotice(message);
+    saveNoticeTimerRef.current = window.setTimeout(() => {
+      setSaveNotice("");
+      saveNoticeTimerRef.current = null;
+    }, 15000);
+  }
+
+  useEffect(() => () => {
+    if (saveNoticeTimerRef.current !== null) {
+      window.clearTimeout(saveNoticeTimerRef.current);
+    }
+  }, []);
 
   useEffect(() => {
     void api.health()
@@ -437,6 +469,69 @@ export function App() {
     }
   }
 
+  async function exportSave(session: GameSession) {
+    setSaveManaging(true);
+    setError("");
+    dismissSaveNotice();
+    try {
+      const payload = await api.exportSession(session.id);
+      const content = JSON.stringify(payload, null, 2);
+      const safeName = session.name
+        .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
+        .trim() || "霍格沃兹存档";
+      const filename = `${safeName}.hp-save.json`;
+      if (isAndroidNative()) {
+        await saveTextFile(filename, content);
+      } else {
+        const blob = new Blob([content], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+      }
+      showSaveNotice(`已导出存档“${session.name}”。`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "导出存档失败");
+    } finally {
+      setSaveManaging(false);
+    }
+  }
+
+  async function importSave(event?: ChangeEvent<HTMLInputElement>) {
+    setSaveManaging(true);
+    setError("");
+    dismissSaveNotice();
+    try {
+      let content = "";
+      if (isAndroidNative()) {
+        content = await pickTextFile();
+      } else {
+        const file = event?.target.files?.[0];
+        if (event) event.target.value = "";
+        if (!file) return;
+        content = await file.text();
+      }
+      const payload = JSON.parse(content) as SaveExport;
+      const imported = await api.importSession(payload);
+      setSessions((current) => [imported, ...current]);
+      setSelectedSessionId(imported.id);
+      setSetup(null);
+      setSetupSessionId(null);
+      setSetupAnswer("");
+      setWorldlineRate(0);
+      setActiveMenu("角色");
+      showSaveNotice(`已读取存档“${imported.name}”。`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "读取存档失败");
+    } finally {
+      setSaveManaging(false);
+    }
+  }
+
   function chooseSetupOption(
     value: string,
     label: string,
@@ -779,20 +874,46 @@ export function App() {
       </section>
 
       <section className="save-section">
+        {saveNotice && <div className="save-notice" role="status">{saveNotice}</div>}
         <div className="section-heading">
           <div>
             <p className="eyebrow">封存的世界线</p>
             <h2>命运卷宗</h2>
           </div>
-          <button
-            aria-label="创建新存档"
-            className="secondary-button save-create-button"
-            disabled={creating || saveManaging}
-            onClick={beginNewSession}
-          >
-            <Plus aria-hidden="true" />
-            创建新存档
-          </button>
+          <div className="save-management-actions">
+            <button
+              aria-label="创建新存档"
+              className="secondary-button save-create-button"
+              disabled={creating || saveManaging}
+              onClick={beginNewSession}
+            >
+              <Plus aria-hidden="true" />
+              创建新存档
+            </button>
+            <button
+              className="secondary-button save-create-button"
+              disabled={creating || saveManaging}
+              onClick={() => {
+                if (isAndroidNative()) {
+                  void importSave();
+                } else {
+                  importInputRef.current?.click();
+                }
+              }}
+            >
+              <UploadSimple aria-hidden="true" />
+              读取存档
+            </button>
+            {!isAndroidNative() && (
+              <input
+                ref={importInputRef}
+                accept=".json,.hp-save.json,application/json"
+                className="save-import-input"
+                type="file"
+                onChange={(event) => void importSave(event)}
+              />
+            )}
+          </div>
         </div>
         <div className="save-grid">
           {sessions.length === 0 ? (
@@ -844,6 +965,9 @@ export function App() {
                 </div>
                 <div className="save-card-actions">
                   <span className="version">v{session.state_version}</span>
+                  <button disabled={saveManaging} onClick={() => void exportSave(session)}>
+                    <DownloadSimple aria-hidden="true" />导出
+                  </button>
                   <button disabled={saveManaging} onClick={() => beginRename(session)}><PencilSimple aria-hidden="true" />重命名</button>
                   <button className="danger" disabled={saveManaging} onClick={() => void removeSession(session)}><Trash aria-hidden="true" />删除</button>
                 </div>

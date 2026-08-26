@@ -21,6 +21,53 @@ from backend.app.models import (
 from backend.app.services.setup import _materialize_player_state
 
 
+def test_export_and_import_session_round_trip_contract() -> None:
+    with TestClient(create_app()) as client:
+        created = client.post(
+            "/api/sessions",
+            json={"name": "Android互认测试"},
+        )
+        assert created.status_code == 201
+        source = created.json()
+
+        exported = client.get(f"/api/sessions/{source['id']}/export")
+        assert exported.status_code == 200
+        payload = exported.json()
+        assert payload["schema_version"] == "1.0"
+        assert payload["session"]["id"] == source["id"]
+        assert payload["player_state"]["setup"]["current_step"] == 1
+
+        payload["story_arcs"] = [{
+            "scope_key": "arc-0001-0025",
+            "status": "ready",
+            "title": "第一阶段",
+            "summary": "前二十五个节点的阶段摘要。",
+            "causal_chain": [],
+            "open_threads": [],
+            "key_characters": [],
+            "key_locations": [],
+            "keywords": [],
+            "important_turns": [],
+            "source_turn_ids": [],
+            "covered_turn_start": 1,
+            "covered_turn_end": 25,
+            "version": 1,
+            "updated_at": "2026-08-26T00:00:00+00:00",
+        }]
+        imported = client.post("/api/sessions/import", json=payload)
+        assert imported.status_code == 201
+        restored = imported.json()
+        assert restored["id"] != source["id"]
+        assert restored["name"] == "Android互认测试（导入）"
+        story_arcs = client.get(f"/api/sessions/{restored['id']}/story-arcs")
+        assert story_arcs.status_code == 200
+        assert story_arcs.json()[0]["title"] == "第一阶段"
+
+        restored_export = client.get(f"/api/sessions/{restored['id']}/export")
+        assert restored_export.status_code == 200
+        assert restored_export.json()["player_state"] == payload["player_state"]
+
+
 @pytest.fixture(autouse=True)
 def mock_attribute_initialization(monkeypatch) -> None:
     async def fake_initialization(self, messages):

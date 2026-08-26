@@ -153,8 +153,10 @@ def _load_runtime_unlocked(files_dir: str) -> dict[str, Any]:
     from backend.app.services.sessions import (
         create_session,
         delete_session,
+        export_session,
         get_player_state,
         get_session,
+        import_session,
         list_journal,
         list_memories,
         list_npcs,
@@ -173,6 +175,7 @@ def _load_runtime_unlocked(files_dir: str) -> dict[str, Any]:
     from backend.app.services.story_arcs import (
         job_to_dict,
         list_story_arc_reads,
+        repair_orphaned_story_arc_jobs,
         retry_story_arc_job,
         story_arc_status,
     )
@@ -185,7 +188,9 @@ def _load_runtime_unlocked(files_dir: str) -> dict[str, Any]:
         SetupConfirm,
         SetupNavigate,
     )
-    from backend.app.schemas.sessions import SessionCreate, SessionRename
+    from backend.app.schemas.sessions import SaveExport, SessionCreate, SessionRename
+
+    repair_orphaned_story_arc_jobs()
 
     _RUNTIME = {
         "config_path": config_path,
@@ -200,8 +205,10 @@ def _load_runtime_unlocked(files_dir: str) -> dict[str, Any]:
         "list_memories": list_memories,
         "create_session": create_session,
         "delete_session": delete_session,
+        "export_session": export_session,
         "get_player_state": get_player_state,
         "get_session": get_session,
+        "import_session": import_session,
         "list_journal": list_journal,
         "list_npcs": list_npcs,
         "list_relationships": list_relationships,
@@ -227,6 +234,7 @@ def _load_runtime_unlocked(files_dir: str) -> dict[str, Any]:
         "SetupNavigate": SetupNavigate,
         "SessionCreate": SessionCreate,
         "SessionRename": SessionRename,
+        "SaveExport": SaveExport,
     }
     return _RUNTIME
 
@@ -361,6 +369,20 @@ def request(path: str, method: str, body: str, files_dir: str) -> str:
         finally:
             db.close()
 
+    if path == "/api/sessions/import" and method == "POST":
+        db = backend_db.get_session_factory()()
+        try:
+            imported = runtime["import_session"](
+                db,
+                runtime["SaveExport"].model_validate(payload),
+            )
+            return _dump(_session_dict(imported))
+        except (KeyError, TypeError, ValueError) as exc:
+            db.rollback()
+            raise ValueError(f"存档文件格式无效：{exc}") from exc
+        finally:
+            db.close()
+
     if not path.startswith("/api/sessions/"):
         raise ValueError(f"移动端暂不支持 {method} {path}")
     session_id, _, suffix = path.removeprefix("/api/sessions/").partition("/")
@@ -389,6 +411,9 @@ def request(path: str, method: str, body: str, files_dir: str) -> str:
             if method == "DELETE":
                 runtime["delete_session"](db, session)
                 return "null"
+
+        if suffix == "export" and method == "GET":
+            return _dump(runtime["export_session"](db, session))
 
         if suffix == "state" and method == "GET":
             return _dump(

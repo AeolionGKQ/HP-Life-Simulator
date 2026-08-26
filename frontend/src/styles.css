@@ -695,7 +695,10 @@ textarea:focus { border-color: var(--accent); background: #101610; outline: 0; }
 .reputation-change span { color: var(--muted); font: 11px/1.6 var(--sans); }
 
 .save-section { margin-top: 16px; padding: clamp(22px, 3vw, 34px); }
-.save-create-button { flex: 0 0 auto; }
+.save-management-actions { display: flex; flex: 0 0 auto; flex-direction: column; gap: 6px; }
+.save-create-button { width: 132px; }
+.success-banner { margin: 14px 0 0; padding: 11px 14px; color: var(--success); border: 1px solid rgba(143, 181, 139, 0.35); border-radius: 5px; background: rgba(143, 181, 139, 0.08); font: 11px/1.6 var(--sans); }
+.save-import-input { display: none; }
 .save-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 9px; margin-top: 22px; }
 .save-card { justify-content: flex-start; min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-raised); transition: border-color 150ms ease, background-color 150ms ease; }
 .save-card:hover { border-color: rgba(229, 218, 190, 0.24); background: var(--surface-soft); }
@@ -711,6 +714,7 @@ textarea:focus { border-color: var(--accent); background: #101610; outline: 0; }
 .save-card-actions { display: flex; align-items: flex-end; flex-direction: column; gap: 5px; margin-left: auto; }
 .save-card-actions button,
 .save-rename button { min-height: 31px; padding: 5px 8px; color: var(--muted); border: 1px solid var(--line); background: transparent; font-size: 10px; }
+.save-card-actions button { display: inline-flex; width: 76px; align-items: center; justify-content: center; gap: 5px; }
 .save-card-actions button:hover,
 .save-rename button:hover { color: var(--text); border-color: var(--line-strong); background: var(--surface); }
 .save-card-actions button.danger { color: var(--danger); }

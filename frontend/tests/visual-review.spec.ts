@@ -31,6 +31,12 @@ const activeSession = {
   state_version: 7,
 };
 
+const importedSession = {
+  ...activeSession,
+  id: "session-imported",
+  name: "黑湖边的旧誓言（导入）",
+};
+
 const setupView = {
   current_step: 6,
   completed: false,
@@ -375,6 +381,20 @@ async function installApi(page: Page, scenario: Scenario) {
       "/api/config/llm": { configured: true, base_url: "https://example.invalid", model: "arcane-narrator", api_key_present: true },
       "/api/sessions": sessions,
       "/api/content/eras": [era],
+      "/api/sessions/session-active/export": {
+        schema_version: "1.0",
+        exported_at: "2026-08-25T12:00:00Z",
+        session: activeSession,
+        player_state: {},
+        npc_states: [],
+        relationships: [],
+        turns: [],
+        journal_entries: [],
+        long_term_memories: [],
+        story_summaries: [],
+        story_arcs: [],
+      },
+      "/api/sessions/import": importedSession,
       "/api/sessions/session-setup/setup": scenario === "setup-birthday"
         ? birthdaySetupView
         : scenario === "setup-confirm"
@@ -953,6 +973,39 @@ for (const viewport of viewports) {
       await expect(next).toBeDisabled();
       if (viewport.name === "mobile") await assertMinimumTouchTargets(page);
       await assertNoHorizontalOverflow(page);
+    });
+
+    test("exports and reads a save from the archive manager", async ({ page }) => {
+      await installApi(page, "story");
+      await page.goto("/");
+
+      await expect(page.getByRole("button", { name: "读取存档" })).toBeVisible();
+      const downloadPromise = page.waitForEvent("download");
+      await page.getByRole("button", { name: "导出" }).click();
+      const download = await downloadPromise;
+      expect(download.suggestedFilename()).toBe("黑湖边的旧誓言.hp-save.json");
+      await expect(page.getByRole("status")).toContainText("已导出存档");
+
+      await page.getByRole("button", { name: "读取存档" }).click();
+      await page.locator('input[type="file"]').setInputFiles({
+        name: "portable.hp-save.json",
+        mimeType: "application/json",
+        buffer: Buffer.from(JSON.stringify({
+          schema_version: "1.0",
+          exported_at: "2026-08-25T12:00:00Z",
+          session: activeSession,
+          player_state: {},
+          npc_states: [],
+          relationships: [],
+          turns: [],
+          journal_entries: [],
+          long_term_memories: [],
+          story_summaries: [],
+          story_arcs: [],
+        })),
+      });
+      await expect(page.getByRole("status")).toContainText("已读取存档");
+      await expect(page.getByRole("button", { name: `打开存档：${importedSession.name}` })).toBeVisible();
     });
 
     test("opens fate intervention and submits a direct story target", async ({ page }) => {

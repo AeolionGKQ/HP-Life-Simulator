@@ -101,6 +101,44 @@ def job_to_dict(job: StoryArcGenerationJob) -> dict[str, Any]:
     }
 
 
+def repair_orphaned_story_arc_jobs() -> None:
+    """Restore ready job metadata for imported story arcs from older saves."""
+    db = get_session_factory()()
+    try:
+        arcs = list(db.scalars(select(StoryArc).where(StoryArc.status == "ready")))
+        for arc in arcs:
+            if arc.covered_turn_start is None or arc.covered_turn_end is None:
+                continue
+            existing = db.scalar(
+                select(StoryArcGenerationJob.id).where(
+                    StoryArcGenerationJob.session_id == arc.session_id,
+                    StoryArcGenerationJob.source_turn_start == arc.covered_turn_start,
+                    StoryArcGenerationJob.source_turn_end == arc.covered_turn_end,
+                )
+            )
+            if existing is not None:
+                continue
+            session = db.get(GameSession, arc.session_id)
+            if session is None:
+                continue
+            db.add(
+                StoryArcGenerationJob(
+                    session_id=arc.session_id,
+                    status="ready",
+                    request_id=f"repair-arc-{uuid4()}",
+                    source_turn_start=arc.covered_turn_start,
+                    source_turn_end=arc.covered_turn_end,
+                    source_turn_ids=list(arc.source_turn_ids or []),
+                    source_state_version=session.state_version,
+                    attempt=1,
+                    completed_at=utc_now(),
+                )
+            )
+        db.commit()
+    finally:
+        db.close()
+
+
 def _journal_summary(turn: TurnRecord, journal: JournalEntry | None) -> str:
     if journal and journal.summary and journal.summary.strip():
         return journal.summary.strip()
@@ -535,6 +573,7 @@ def schedule_story_arc_job(job_id: str) -> None:
 
 
 def recover_story_arc_jobs() -> None:
+    repair_orphaned_story_arc_jobs()
     db = get_session_factory()()
     try:
         jobs = list(

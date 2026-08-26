@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.app.core.config import LLMSettings, get_settings, update_llm_config
@@ -20,6 +21,7 @@ from backend.app.schemas.sessions import (
     SessionDetail,
     SessionRead,
     SessionRename,
+    SaveExport,
 )
 from backend.app.schemas.game import (
     ActionRequest,
@@ -43,6 +45,7 @@ from backend.app.schemas.game import (
 from backend.app.services.sessions import (
     create_session,
     delete_session,
+    export_session,
     get_player_state,
     get_session,
     list_journal,
@@ -51,6 +54,7 @@ from backend.app.services.sessions import (
     list_relationships,
     list_sessions,
     list_turns,
+    import_session,
     rename_session,
 )
 from backend.app.services.setup import (
@@ -167,6 +171,30 @@ def create_game_session(
 @router.get("/sessions", response_model=list[SessionRead])
 def get_game_sessions(db: Session = Depends(get_db)) -> list[SessionRead]:
     return list_sessions(db)
+
+
+@router.get("/sessions/{session_id}/export", response_model=SaveExport)
+def export_game_session(
+    session_id: str,
+    db: Session = Depends(get_db),
+) -> SaveExport:
+    game_session = _require_session(db, session_id)
+    try:
+        return export_session(db, game_session)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/sessions/import", response_model=SessionRead, status_code=status.HTTP_201_CREATED)
+def import_game_session(
+    payload: SaveExport,
+    db: Session = Depends(get_db),
+) -> SessionRead:
+    try:
+        return import_session(db, payload)
+    except (IntegrityError, KeyError, TypeError, ValueError) as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=f"存档文件格式无效：{exc}") from exc
 
 
 @router.get("/sessions/{session_id}", response_model=SessionDetail)

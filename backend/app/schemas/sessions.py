@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Any
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -26,4 +27,18 @@ class SessionDetail(SessionRead):
 
 class SessionRename(BaseModel):
     name: str = Field(min_length=1, max_length=200)
+
+
+class SaveExport(BaseModel):
+    schema_version: Literal["1.0"]
+    exported_at: datetime
+    session: SessionRead
+    player_state: dict[str, Any]
+    npc_states: list[dict[str, Any]]
+    relationships: list[dict[str, Any]]
+    turns: list[dict[str, Any]]
+    journal_entries: list[dict[str, Any]]
+    long_term_memories: list[dict[str, Any]]
+    story_summaries: list[dict[str, Any]]
+    story_arcs: list[dict[str, Any]]
 
