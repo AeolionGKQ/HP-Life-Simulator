@@ -1,0 +1,36 @@
+# Local secrets and runtime data
+config/settings.local.toml
+LLM API KEY.txt
+data/
+Andriod Version/*.apk*
+
+# Local-only launcher wrapper
+Start HP Simulator.bat
+Andriod Version/android-test-data/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+*.egg-info/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+
+# Portable launcher build output
+portable-build/
+portable-dist/
+portable-audit/
+HP-Life-Simulator-*-Windows-Portable.zip
+packaging/__pycache__/
+
+# Editors and operating system
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

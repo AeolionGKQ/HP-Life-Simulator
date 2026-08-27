@@ -303,7 +303,6 @@ const playerState = {
     last_delta: 4,
     last_reason: "保护低年级学生并公开作证",
   },
-  letters: [],
 };
 
 const expelledPlayerState = {
@@ -445,6 +444,10 @@ async function installApi(page: Page, scenario: Scenario) {
         status: 502,
         json: { detail: "模型属性校准失败，请稍后重试" },
       });
+      return;
+    }
+    if (scenario === "story-initial" && path === "/api/sessions/session-active/courses") {
+      await route.fulfill({ status: 503, json: { detail: "课程档案暂时不可用" } });
       return;
     }
     const body = bodies[path];

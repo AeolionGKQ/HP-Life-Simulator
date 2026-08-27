@@ -376,8 +376,20 @@ class Choice(BaseModel):
     effects: ChoiceEffects = ChoiceEffects()
 
 
+class TimelineEffect(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    touches_time_causality: bool = False
+    changed_facts: list[str] = Field(default_factory=list, max_length=8)
+    proposed_disturbance_delta: float = Field(default=0, ge=-100, le=100)
+    affected_nodes: list[str] = Field(default_factory=list, max_length=8)
+    consequence_applied: str | None = None
+    reason: str = Field(default="", max_length=500)
+    evidence: str = Field(default="", max_length=500)
+
+
 class WorldlineResponse(BaseModel):
-    offset_rate: float = Field(ge=0, le=100)
+    offset_rate: float = Field(default=0, ge=0, le=100)
     delta: float = 0
     reason: str = ""
     affected_nodes: list[str] = []
@@ -435,6 +447,7 @@ class NarrativeResponse(BaseModel):
     player_changes: PlayerChanges = PlayerChanges()
     applied_changes: AppliedPlayerChanges = AppliedPlayerChanges()
     worldline: WorldlineResponse
+    timeline_effect: TimelineEffect | None = None
     events: list[dict[str, Any]] = []
     memory_update: MemoryUpdate = MemoryUpdate()
     self_check: dict[str, Any] = {}

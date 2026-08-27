@@ -19,6 +19,7 @@ from backend.app.models import (
     TurnRecord,
 )
 from backend.app.services.setup import _materialize_player_state
+from backend.app.services.sessions import _normalize_imported_player_state
 
 
 def test_export_and_import_session_round_trip_contract() -> None:
@@ -123,6 +124,7 @@ def test_create_and_read_session() -> None:
         assert "resources" in detail.json()["player_state"]
         assert "dimensions" in detail.json()["player_state"]
         assert "attributes" not in detail.json()["player_state"]
+        assert "letters" not in detail.json()["player_state"]
 
 
 def test_origin_setup_options_have_three_preset_descriptions() -> None:
@@ -304,6 +306,118 @@ def test_origin_values_are_normalized_during_state_materialization(
 
     assert state["family"]["origin_id"] == expected_origin_id
     assert state["family"]["bloodline"] == raw_origin
+
+
+def test_modern_materialization_uses_fixed_fourth_year_opening() -> None:
+    state: dict = {"school": {}}
+    answers = {
+        "2": "现代测试者",
+        "3": "未设定",
+        "4": "2006-03-12",
+        "6": "half_blood",
+        "10": "冬青木，凤凰羽毛",
+        "11": "咒语直觉",
+        "14": "sorting_ceremony",
+        "15": "slytherin",
+    }
+
+    _materialize_player_state(state, answers, "modern")
+
+    assert state["identity"]["age"] == 14
+    assert state["current_context"]["current_date"] == "2020-09-01"
+    assert state["current_context"]["location_id"] == "platform_nine_three_quarters"
+    assert state["school"]["grade"] == "year_4"
+    assert state["school"]["school_year"] == "2020-2021"
+    assert state["school"]["enrollment_started"] is True
+    assert state["school"]["sorting_completed"] is True
+    assert state["school"]["active_courses"] == []
+    assert state["school"]["elective_courses"] == []
+    assert state["school"]["course_selection"] is None
+    assert state["school"]["course_history"] == []
+    assert state["worldline"]["mode"] == "temporal_disturbance"
+    assert state["worldline"]["current_timeline_id"] == "original_2020"
+    assert state["modern_arc"]["phase_id"] == "modern_school_arrival"
+
+
+def test_modern_setup_exposes_fixed_start_and_seeds_modern_cast() -> None:
+    answers = {
+        1: "modern",
+        2: "现代好友测试",
+        3: "女",
+        4: "2006-03-12",
+        5: "乌黑短发，深褐色眼睛",
+        6: "混血家庭",
+        7: "在麻瓜学校隐藏反常能力",
+        8: "冷静谨慎，好奇求知",
+        9: "血统平等",
+        10: "冬青木，凤凰羽毛",
+        11: "咒语直觉",
+        12: "猫头鹰",
+        13: "阿不思·西弗勒斯·波特",
+        14: "platform_nine_three_quarters",
+        15: "ravenclaw",
+        16: "猫",
+        17: "",
+    }
+    with TestClient(create_app()) as client:
+        created = client.post(
+            "/api/sessions",
+            json={"name": "现代线固定开局测试"},
+        ).json()
+        session_id = created["id"]
+        for step, answer in answers.items():
+            response = client.post(
+                f"/api/sessions/{session_id}/setup/answer",
+                json={"step": step, "answer": answer},
+            )
+            assert response.status_code == 200, response.text
+            if step == 12:
+                assert any(
+                    option["value"] == "阿不思·西弗勒斯·波特"
+                    for option in response.json()["current"]["options"]
+                )
+            if step == 13:
+                assert response.json()["current"]["title"] == "固定剧情起点"
+                assert len(response.json()["current"]["options"]) == 1
+        confirmed = client.post(
+            f"/api/sessions/{session_id}/setup/confirm",
+            json={"confirmed": True},
+        )
+        assert confirmed.status_code == 200, confirmed.text
+        state = client.get(f"/api/sessions/{session_id}/state").json()["state"]
+        assert state["school"]["grade"] == "year_4"
+        assert state["current_context"]["current_date"] == "2020-09-01"
+        npcs = client.get(f"/api/sessions/{session_id}/npcs").json()
+        npc_by_id = {npc["npc_id"]: npc for npc in npcs}
+        assert npc_by_id["albus_potter"]["state"]["age"] == 14
+        assert npc_by_id["albus_potter"]["state"]["age_reference_date"] == "2020-09-01"
+        relationships = client.get(
+            f"/api/sessions/{session_id}/relationships"
+        ).json()
+        assert any(
+            item["target_id"] == "albus_potter"
+            and item["state"]["stage"] == "friend"
+            for item in relationships
+        )
+
+
+def test_import_normalizes_unknown_era_without_leaking_modern_fields() -> None:
+    state = {
+        "worldline": {
+            "mode": "temporal_disturbance",
+            "offset_rate": 12,
+            "temporal_disturbance": 60,
+            "temporal_stability": 40,
+            "current_timeline_id": "altered_2020",
+        },
+        "modern_arc": {"phase_id": "modern_aftershock"},
+    }
+
+    normalized = _normalize_imported_player_state(state, "second_generation")
+
+    assert normalized["worldline"] == {"offset_rate": 12}
+    assert "modern_arc" not in normalized
+    assert state["worldline"]["temporal_disturbance"] == 60
 
 
 def test_acknowledge_departure_notice_persists_and_increments_state_version() -> None:

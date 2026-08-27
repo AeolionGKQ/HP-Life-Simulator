@@ -38,13 +38,14 @@ def _extract_json_template(system_prompt: str, name: str) -> dict[str, Any]:
 def _build_messages(
     state: dict[str, Any] | None = None,
     *,
+    era_id: str = "second_generation",
     action: dict[str, Any] | None = None,
     recent_turns: list[Any] | None = None,
 ) -> list[dict[str, str]]:
     return build_turn_messages(
         game_session=SimpleNamespace(
             id="session-1",
-            era_id="second_generation",
+            era_id=era_id,
             status="active",
             state_version=1,
         ),
@@ -56,6 +57,65 @@ def _build_messages(
         summaries=[],
         action=action or {"kind": "choice", "choice_id": "start_story"},
     )
+
+
+def test_modern_prompt_omits_course_system_context() -> None:
+    state = {
+        "school": {
+            "grade": "year_4",
+            "active_courses": ["charms"],
+            "course_selection": {"status": "pending"},
+            "course_history": [{"school_year": "2020-2021"}],
+        },
+        "skills": {
+            "charms": {
+                "id": "charms",
+                "name": "咒语",
+                "course_skill": True,
+                "level": 1,
+            },
+            "wandwork": {
+                "id": "wandwork",
+                "name": "魔杖运用",
+                "course_skill": False,
+                "level": 1,
+            },
+        },
+    }
+    messages = _build_messages(state, era_id="modern")
+    system_prompt = messages[0]["content"]
+    context = json.loads(messages[1]["content"].split("\n", 1)[1])
+
+    assert "课程" not in system_prompt
+    assert "课程状态是程序权威" not in system_prompt
+    assert "current_courses" not in context
+    assert "course_catalog" not in context
+    assert "course_rules" not in context
+    assert "active_courses" not in context["player_state"]["school"]
+    assert "course_history" not in context["player_state"]["school"]
+    assert "charms" not in context["current_skills"]
+    assert "wandwork" in context["current_skills"]
+
+
+def test_second_generation_prompt_keeps_course_system_context() -> None:
+    messages = _build_messages(
+        {
+            "school": {
+                "grade": "year_3",
+                "active_courses": ["charms"],
+                "course_selection": {"status": "pending"},
+            },
+            "skills": {},
+        },
+    )
+    system_prompt = messages[0]["content"]
+    context = json.loads(messages[1]["content"].split("\n", 1)[1])
+
+    assert "课程状态是程序权威" in system_prompt
+    assert "current_courses" in context
+    assert "course_catalog" in context
+    assert "course_rules" in context
+    assert context["current_courses"]["active_courses"] == ["charms"]
 
 
 def test_turn_system_prompt_contains_parseable_response_templates() -> None:

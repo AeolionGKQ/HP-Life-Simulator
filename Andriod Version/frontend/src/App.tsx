@@ -3,7 +3,6 @@ import {
   Archive,
   BookOpenText,
   DownloadSimple,
-  Envelope,
   GearSix,
   GitBranch,
   GraduationCap,
@@ -44,7 +43,6 @@ const menuItems = [
   { label: "恋爱", icon: Heart },
   { label: "声望", icon: Medal },
   { label: "课程", icon: GraduationCap },
-  { label: "信件", icon: Envelope },
   { label: "世界线", icon: GitBranch },
 ];
 
@@ -236,6 +234,19 @@ export function App() {
   const currentEra = selectedSession
     ? eraById[selectedSession.era_id] ?? GENERIC_ERA
     : GENERIC_ERA;
+  const timelineLabel = currentEra.id === "modern" ? "时间扰动" : "世界线";
+  const visibleMenuItems = menuItems.filter(
+    ({ label }) => label !== "课程" || currentEra.id !== "modern",
+  );
+
+  useEffect(() => {
+    if (activeMenu === "世界线" || activeMenu === "时间扰动") {
+      setActiveMenu(timelineLabel);
+    }
+    if (currentEra.id === "modern" && activeMenu === "课程") {
+      setActiveMenu("剧情");
+    }
+  }, [activeMenu, currentEra.id, timelineLabel]);
 
   useEffect(() => {
     if (!setup || setup.completed) return;
@@ -649,17 +660,20 @@ export function App() {
             <Sparkle className="menu-mark" aria-hidden="true" />
           </div>
           <nav aria-label="魔法档案导航">
-            {menuItems.map(({ label, icon: MenuIcon }) => (
+            {visibleMenuItems.map(({ label, icon: MenuIcon }) => {
+              const displayLabel = label === "世界线" ? timelineLabel : label;
+              return (
                 <button
-                  aria-current={activeMenu === label ? "page" : undefined}
-                  className={activeMenu === label ? "menu-item active" : "menu-item"}
-                  key={label}
-                  onClick={() => setActiveMenu(label)}
+                  aria-current={activeMenu === displayLabel ? "page" : undefined}
+                  className={activeMenu === displayLabel ? "menu-item active" : "menu-item"}
+                  key={displayLabel}
+                  onClick={() => setActiveMenu(displayLabel)}
                 >
-                  <span className="menu-label"><MenuIcon aria-hidden="true" />{label}</span>
+                  <span className="menu-label"><MenuIcon aria-hidden="true" />{displayLabel}</span>
                   {label === "世界线" && <span className="worldline-value">{worldlineRate.toFixed(1)}%</span>}
                 </button>
-              ))}
+              );
+            })}
           </nav>
           <div className="sidebar-note">
             这里的查看不会惊动时间齿轮，也不会打断正在编织的剧情。
@@ -841,6 +855,8 @@ export function App() {
             <GameView
               sessionId={selectedSessionId}
               activeMenu={activeMenu}
+              eraId={currentEra.id}
+              timelineLabel={timelineLabel}
               onWorldlineChange={setWorldlineRate}
             />
           ) : (
@@ -919,11 +935,18 @@ export function App() {
           {sessions.length === 0 ? (
             <div className="save-empty">档案柜仍空空如也。第一卷命运，将从你的名字开始。</div>
           ) : (
-            sessions.map((session) => (
-              <article
-                className={selectedSessionId === session.id ? "save-card selected" : "save-card"}
-                key={session.id}
-              >
+            buildSaveGroups(sessions).map((group) => (
+              <section className="save-generation-group" key={group.id}>
+                <div className="save-generation-heading">
+                  <h3>{group.title}</h3>
+                  <span>{group.sessions.length} 卷</span>
+                </div>
+                <div className="save-generation-cards">
+                {group.sessions.map((session) => (
+                  <article
+                    className={selectedSessionId === session.id ? "save-card selected" : "save-card"}
+                    key={session.id}
+                  >
                 <div className="save-card-icon" aria-hidden="true"><Archive /></div>
                 <div className="save-card-body">
                   {renamingSessionId === session.id ? (
@@ -971,13 +994,38 @@ export function App() {
                   <button disabled={saveManaging} onClick={() => beginRename(session)}><PencilSimple aria-hidden="true" />重命名</button>
                   <button className="danger" disabled={saveManaging} onClick={() => void removeSession(session)}><Trash aria-hidden="true" />删除</button>
                 </div>
-              </article>
+                  </article>
+                ))}
+                </div>
+              </section>
             ))
           )}
         </div>
       </section>
     </main>
   );
+}
+
+function buildSaveGroups(sessions: GameSession[]) {
+  const groups = new Map<string, { id: string; title: string; sessions: GameSession[] }>();
+
+  for (const session of sessions) {
+    const groupId = session.era_id === "modern"
+      ? "modern"
+      : session.era_id === "second_generation"
+        ? "second_generation"
+        : "other";
+    const title = groupId === "modern"
+      ? "现代存档"
+      : groupId === "second_generation"
+        ? "子世代存档"
+        : "其他世代存档";
+    const group = groups.get(groupId) ?? { id: groupId, title, sessions: [] };
+    group.sessions.push(session);
+    groups.set(groupId, group);
+  }
+
+  return Array.from(groups.values());
 }
 
 function groupSetupOptions(options: SetupView["current"]["options"]) {

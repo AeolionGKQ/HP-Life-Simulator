@@ -14,9 +14,12 @@ interface PythonBridgePlugin {
     method: string;
     body: string;
   }): Promise<{ payload: string }>;
+  prepareSaveFile(payload: {
+    content: string;
+  }): Promise<{ token: string }>;
   saveFile(payload: {
     filename: string;
-    content: string;
+    token: string;
   }): Promise<{ saved: boolean; uri: string }>;
   pickFile(): Promise<{ content: string; filename: string; uri: string }>;
 }
@@ -45,7 +48,8 @@ export async function requestPython<T>(
 }
 
 export async function saveTextFile(filename: string, content: string): Promise<void> {
-  await PythonBridge.saveFile({ filename, content });
+  const { token } = await PythonBridge.prepareSaveFile({ content });
+  await PythonBridge.saveFile({ filename, token });
 }
 
 export async function pickTextFile(): Promise<string> {

@@ -275,6 +275,8 @@ def get_game_courses(
     player_state = get_player_state(db, session_id)
     if player_state is None:
         raise HTTPException(status_code=404, detail="角色状态不存在")
+    if game_session.era_id == "modern":
+        raise HTTPException(status_code=409, detail="现代世代不启用课程系统")
     return get_courses_view(game_session, player_state)
 
 
@@ -288,6 +290,8 @@ def update_game_courses(
     player_state = get_player_state(db, session_id)
     if player_state is None:
         raise HTTPException(status_code=404, detail="角色状态不存在")
+    if game_session.era_id == "modern":
+        raise HTTPException(status_code=409, detail="现代世代不启用课程系统")
     try:
         return select_courses(db, game_session, player_state, payload)
     except ValueError as exc:

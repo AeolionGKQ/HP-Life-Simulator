@@ -415,3 +415,66 @@ def test_course_api_writes_selection_without_turn_record() -> None:
         db.delete(db.get(GameSession, session_id))
         db.delete(persisted)
         db.commit()
+
+
+def test_modern_course_api_is_disabled() -> None:
+    app = create_app()
+    with get_session_factory()() as db:
+        game_session = GameSession(name="现代线无课程测试", era_id="modern")
+        db.add(game_session)
+        db.flush()
+        player_state = PlayerState(session_id=game_session.id, state=_enrolled_state())
+        db.add(player_state)
+        db.commit()
+        session_id = game_session.id
+
+    with TestClient(app) as client:
+        view = client.get(f"/api/sessions/{session_id}/courses")
+        assert view.status_code == 409
+        assert view.json()["detail"] == "现代世代不启用课程系统"
+        selected = client.put(
+            f"/api/sessions/{session_id}/courses",
+            json={
+                "expected_state_version": 0,
+                "selection_phase": "elective",
+                "course_ids": ["divination", "ancient_runes"],
+            },
+        )
+        assert selected.status_code == 409
+        assert selected.json()["detail"] == "现代世代不启用课程系统"
+
+    with get_session_factory()() as db:
+        persisted = db.scalar(
+            select(PlayerState).where(PlayerState.session_id == session_id)
+        )
+        db.delete(db.get(GameSession, session_id))
+        db.delete(persisted)
+        db.commit()
+
+
+def test_modern_turn_does_not_open_or_progress_courses() -> None:
+    state = _enrolled_state()
+    state["school"].update(
+        {
+            "grade": "year_2",
+            "school_year": "2020-2021",
+            "grade_started_year": 2020,
+            "active_courses": ["charms"],
+            "course_selection": None,
+        }
+    )
+    next_state, changes = apply_turn_rules(
+        state,
+        [],
+        _response("2021-09-01", grade="year_3"),
+        era_id="modern",
+    )
+
+    assert next_state["school"]["grade"] == "year_3"
+    assert next_state["school"]["active_courses"] == []
+    assert next_state["school"]["course_selection"] is None
+    assert next_state["school"]["course_history"] == []
+    assert not any(
+        key in changes
+        for key in ("school_exams", "course_progression", "course_selection")
+    )

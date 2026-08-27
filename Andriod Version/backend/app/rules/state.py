@@ -70,9 +70,12 @@ def apply_turn_rules(
     response: NarrativeResponse,
     *,
     npc_ages: dict[str, int | None] | None = None,
+    era_id: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """应用模型提出的可验证变化，返回新状态和审计差异。"""
     next_state = deepcopy(state)
+    if era_id == "modern":
+        _disable_course_system(next_state)
     proposals = response.player_changes.model_dump()
     if not any(proposals.values()) and response.state_proposals:
         proposals = deepcopy(response.state_proposals)
@@ -121,8 +124,16 @@ def apply_turn_rules(
         changes["location_id"] = response.turn.location_id
     _update_age(next_state, _parse_datetime(context.get("datetime")), changes)
     _apply_story_milestone_events(next_state, response.events, changes)
-    _apply_school_exam_events(next_state, response.events, changes)
-    _apply_grade_transition(next_state, response, current_date, changes)
+    courses_enabled = era_id != "modern"
+    if courses_enabled:
+        _apply_school_exam_events(next_state, response.events, changes)
+    _apply_grade_transition(
+        next_state,
+        response,
+        current_date,
+        changes,
+        courses_enabled=courses_enabled,
+    )
 
     _apply_resource_caps(next_state, proposals.get("resource_cap_deltas"), changes)
     _apply_dimension_caps(next_state, proposals.get("dimension_cap_deltas"), changes)
@@ -139,7 +150,8 @@ def apply_turn_rules(
     _apply_traits(next_state, proposals, changes)
     _apply_reputation(next_state, proposals.get("reputation_deltas"), changes)
     _apply_reputation_enforcement(next_state, changes)
-    _apply_course_year_end(next_state, current_date, changes)
+    if courses_enabled:
+        _apply_course_year_end(next_state, current_date, changes)
     _apply_inventory(next_state, proposals, changes)
     _apply_relationships(
         next_state,
@@ -152,6 +164,21 @@ def apply_turn_rules(
     _apply_lifecycle(next_state, changes)
     response.turn.grade = normalize_grade(next_state.setdefault("school", {}))
     return next_state, changes
+
+
+def _disable_course_system(state: dict[str, Any]) -> None:
+    school = state.setdefault("school", {})
+    for field in ("active_courses", "elective_courses", "newt_courses", "course_history"):
+        school[field] = []
+    school["course_selection"] = None
+    school["owl_results"] = {}
+    school["newt_results"] = {}
+    skills = state.get("skills")
+    if isinstance(skills, dict):
+        for skill_id in list(skills):
+            skill = skills.get(skill_id)
+            if isinstance(skill, dict) and skill.get("course_skill"):
+                skills.pop(skill_id, None)
 
 
 def _parse_datetime(value: Any) -> datetime:
@@ -295,6 +322,8 @@ def _apply_grade_transition(
     response: NarrativeResponse,
     current_date: date,
     changes: dict[str, Any],
+    *,
+    courses_enabled: bool = True,
 ) -> None:
     school = state.setdefault("school", {})
     current_grade = normalize_grade(school)
@@ -322,6 +351,7 @@ def _apply_grade_transition(
                     current_grade,
                     current_date,
                     changes,
+                    courses_enabled=courses_enabled,
                 )
             else:
                 _reject_grade(
@@ -337,6 +367,7 @@ def _apply_grade_transition(
                 current_grade,
                 current_date,
                 changes,
+                courses_enabled=courses_enabled,
             )
         return
 
@@ -382,7 +413,8 @@ def _apply_grade_transition(
         school["departure_reason"] = None
         school["grade_started_year"] = current_date.year
         school["last_grade_promotion_key"] = None
-        _open_first_year_courses(state, school, current_date.year, changes)
+        if courses_enabled:
+            _open_first_year_courses(state, school, current_date.year, changes)
     elif transition.type == "promotion":
         school["school_year"] = f"{current_date.year}-{current_date.year + 1}"
         school["departure_reason"] = None
@@ -390,7 +422,8 @@ def _apply_grade_transition(
         school["last_grade_promotion_key"] = (
             f"{current_grade}:{requested_grade}:{current_date.year}"
         )
-        _apply_grade_course_structure(state, school, requested_grade, changes)
+        if courses_enabled:
+            _apply_grade_course_structure(state, school, requested_grade, changes)
     else:
         school["departure_reason"] = transition.reason
         _clear_current_courses(school, changes)
@@ -530,6 +563,8 @@ def _auto_promote_on_new_school_year(
     current_grade: str,
     current_date: date,
     changes: dict[str, Any],
+    *,
+    courses_enabled: bool = True,
 ) -> None:
     target_grade = PROMOTION_TARGETS.get(current_grade)
     started_year = school.get("grade_started_year")
@@ -555,7 +590,8 @@ def _auto_promote_on_new_school_year(
     school["grade_started_year"] = current_date.year
     school["last_grade_promotion_key"] = promotion_key
     school["departure_reason"] = None
-    _apply_grade_course_structure(state, school, target_grade, changes)
+    if courses_enabled:
+        _apply_grade_course_structure(state, school, target_grade, changes)
     changes["school_grade"] = {
         "before": current_grade,
         "after": target_grade,

@@ -442,6 +442,8 @@ def request(path: str, method: str, body: str, files_dir: str) -> str:
                 }
             )
         if suffix == "courses":
+            if session.era_id == "modern":
+                raise ValueError("现代世代不启用课程系统")
             if method == "GET":
                 return _dump(runtime["get_courses_view"](session, player_state))
             if method == "PUT":

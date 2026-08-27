@@ -48,6 +48,7 @@ test.beforeEach(async ({ page }) => {
 
 test("exposes the archive as a named navigation landmark", async ({ page }) => {
   await expect(page.getByRole("navigation", { name: "魔法档案导航" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "信件" })).toHaveCount(0);
 });
 
 test("opens the new-save flow from the archive manager", async ({ page }) => {

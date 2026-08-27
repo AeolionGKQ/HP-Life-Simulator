@@ -13,14 +13,25 @@ import {
   type StoryArcStatus,
   type TurnResult,
 } from "./api";
+import { translateMemoryStatus, translateTimelineId } from "./temporalLabels";
 
 interface GameViewProps {
   sessionId: string;
   activeMenu: string;
+  eraId: string;
+  timelineLabel: string;
   onWorldlineChange: (value: number) => void;
 }
 
 const NPC_NAMES: Record<string, string> = {
+  albus_potter: "阿不思·西弗勒斯·波特",
+  scorpius_malfoy: "斯科皮·马尔福",
+  rose_granger_weasley: "罗丝·格兰杰-韦斯莱",
+  polly_chapman: "波莉·查普曼",
+  karl_jenkins: "卡尔·詹金斯",
+  craig_bowker_junior: "克雷格·鲍克二世",
+  delphini: "德尔菲",
+  amos_diggory: "阿莫斯·迪戈里",
   harry_potter: "哈利·波特",
   ron_weasley: "罗恩·韦斯莱",
   hermione_granger: "赫敏·格兰杰",
@@ -39,6 +50,8 @@ const NPC_NAMES: Record<string, string> = {
 export function GameView({
   sessionId,
   activeMenu,
+  eraId,
+  timelineLabel,
   onWorldlineChange,
 }: GameViewProps) {
   const [state, setState] = useState<Record<string, any> | null>(null);
@@ -71,35 +84,55 @@ export function GameView({
   const [retryingStoryArc, setRetryingStoryArc] = useState(false);
 
   async function refreshState() {
-    const [stateResponse, journalResponse, relationshipResponse, npcResponse, turnsResponse, coursesResponse] = await Promise.all([
-      api.state(sessionId),
+    const stateResponse = await api.state(sessionId);
+    setState(stateResponse.state);
+    setStateVersion(stateResponse.state_version);
+    onWorldlineChange(
+      eraId === "modern"
+        ? stateResponse.state.worldline?.temporal_disturbance ?? 0
+        : stateResponse.state.worldline?.offset_rate ?? 0,
+    );
+
+    const courseRequest = eraId === "modern"
+      ? Promise.resolve(null)
+      : api.courses(sessionId);
+    const results = await Promise.allSettled([
       api.journal(sessionId),
       api.relationships(sessionId),
       api.npcs(sessionId),
       api.turns(sessionId),
-      api.courses(sessionId),
+      courseRequest,
     ]);
-    setState(stateResponse.state);
-    setStateVersion(stateResponse.state_version);
-    setJournal(journalResponse);
-    setRelationships(relationshipResponse);
-    setNpcs(npcResponse);
-    setTurnHistory(turnsResponse);
-    setCourses(coursesResponse);
-    setViewedTurnIndex(turnsResponse.length - 1);
-    const latestTurn = turnsResponse[turnsResponse.length - 1];
-    if (latestTurn) {
-      setTurn({
-        turn_id: latestTurn.id,
-        sequence: latestTurn.sequence,
-        state_version: latestTurn.state_version_after,
-        recalled_memory_ids: [],
-        response: latestTurn.response,
-      });
-    } else {
-      setTurn(null);
+    const [journalResult, relationshipResult, npcResult, turnsResult, coursesResult] = results;
+    if (journalResult.status === "fulfilled") {
+      setJournal(journalResult.value);
     }
-    onWorldlineChange(stateResponse.state.worldline?.offset_rate ?? 0);
+    if (relationshipResult.status === "fulfilled") {
+      setRelationships(relationshipResult.value);
+    }
+    if (npcResult.status === "fulfilled") {
+      setNpcs(npcResult.value);
+    }
+    if (turnsResult.status === "fulfilled") {
+      const turns = turnsResult.value;
+      setTurnHistory(turns);
+      setViewedTurnIndex(turns.length - 1);
+      const latestTurn = turns[turns.length - 1];
+      if (latestTurn) {
+        setTurn({
+          turn_id: latestTurn.id,
+          sequence: latestTurn.sequence,
+          state_version: latestTurn.state_version_after,
+          recalled_memory_ids: [],
+          response: latestTurn.response,
+        });
+      } else {
+        setTurn(null);
+      }
+    }
+    if (coursesResult.status === "fulfilled" && coursesResult.value !== null) {
+      setCourses(coursesResult.value);
+    }
   }
 
   useEffect(() => {
@@ -289,7 +322,9 @@ export function GameView({
         location_name: visibleResponse.turn.location_name,
       }
     : context;
-  const displayWorldline = visibleResponse?.worldline ?? worldline;
+  const displayWorldline = eraId === "modern"
+    ? worldline
+    : visibleResponse?.worldline ?? worldline;
   const hasStarted = turnHistory.length > 0 || journal.length > 0 || turn !== null;
   const courseSelectionPending = courses?.course_selection?.status === "pending";
   const departureNoticePending = departureNotice.status === "pending";
@@ -357,7 +392,29 @@ export function GameView({
   }
 
   if (!state) {
-    return <div className="empty-panel"><span className="empty-icon" aria-hidden="true"><BookOpenText /></span><p>正在读取人生状态…</p></div>;
+    return (
+      <div className="empty-panel">
+        <span className="empty-icon" aria-hidden="true"><BookOpenText /></span>
+        {error ? (
+          <>
+            <p>{error}</p>
+            <button
+              className="primary-button"
+              onClick={() => {
+                setError("");
+                void refreshState().catch((reason: unknown) => {
+                  setError(reason instanceof Error ? reason.message : "无法读取游戏状态");
+                });
+              }}
+            >
+              重新读取人生状态
+            </button>
+          </>
+        ) : (
+          <p>正在读取人生状态…</p>
+        )}
+      </div>
+    );
   }
 
   if (activeMenu !== "剧情") {
@@ -470,11 +527,36 @@ export function GameView({
             ))}
           </div>
         )}
-        {activeMenu === "世界线" && (
+        {activeMenu === timelineLabel && (
           <div className="worldline-panel">
-            <div className="worldline-large">{Number(worldline.offset_rate ?? 0).toFixed(1)}%</div>
-            <p>{worldline.reason ?? "历史的星轨仍循着原本的方向安静运行。"}</p>
-            <ReadableSection title="受到波动的命运节点" data={worldline.affected_nodes ?? []} emptyText="暂时没有原著节点受到波及。" />
+            <div className="worldline-large">{Number(
+              eraId === "modern"
+                ? worldline.temporal_disturbance ?? 0
+                : worldline.offset_rate ?? 0,
+            ).toFixed(1)}%</div>
+            <p>{worldline.reason ?? (
+              eraId === "modern"
+                ? "时间结构仍沿着原始2020年稳定运行。"
+                : "历史的星轨仍循着原本的方向安静运行。"
+            )}</p>
+            {eraId === "modern" && (
+              <div className="worldline-modern-meta">
+                <Stat label="时间稳定度" value={`${Number(worldline.temporal_stability ?? 100).toFixed(1)}%`} />
+                <Stat
+                  label="当前时间线"
+                  value={translateTimelineId(worldline.current_timeline_id ?? "original_2020")}
+                />
+                <Stat
+                  label="记忆状态"
+                  value={translateMemoryStatus(worldline.memory_status ?? "original")}
+                />
+              </div>
+            )}
+            <ReadableSection
+              title="受到波动的命运节点"
+              data={worldline.affected_nodes ?? []}
+              emptyText={eraId === "modern" ? "暂时没有时间节点受到影响。" : "暂时没有原著节点受到波及。"}
+            />
           </div>
         )}
         {activeMenu === "课程" && courses && (
@@ -511,13 +593,6 @@ export function GameView({
         )}
         {activeMenu === "声望" && (
           <ReputationPanel value={player.reputation} />
-        )}
-        {activeMenu === "信件" && (
-          <ReadableSection
-            title="猫头鹰邮递"
-            data={player.letters ?? {}}
-            emptyText="猫头鹰棚里暂时没有寄给你的新信。"
-          />
         )}
       </div>
     );
@@ -625,7 +700,11 @@ export function GameView({
             <span>
               地点：{displayContext.location_name || translateValue(displayContext.location_id ?? "unknown")}
             </span>
-            <span>世界线 {Number(displayWorldline.offset_rate ?? 0).toFixed(1)}%</span>
+            <span>{timelineLabel} {Number(
+              eraId === "modern"
+                ? displayWorldline.temporal_disturbance ?? 0
+                : displayWorldline.offset_rate ?? 0,
+            ).toFixed(1)}%</span>
           </div>
           {!hasStarted ? (
             <div className="first-scene">

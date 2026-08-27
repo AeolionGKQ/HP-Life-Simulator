@@ -5,10 +5,16 @@ import android.content.Intent;
 import android.net.Uri;
 import android.util.Log;
 
+import java.io.BufferedInputStream;
 import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -145,42 +151,100 @@ public class PythonBridgePlugin extends Plugin {
     }
 
     @PluginMethod
-    public void saveFile(PluginCall call) {
-        String filename = call.getString("filename", "霍格沃兹存档.hp-save.json");
+    public void prepareSaveFile(PluginCall call) {
         String content = call.getString("content");
         if (content == null) {
             call.reject("导出存档内容为空");
+            return;
+        }
+        pythonExecutor.execute(() -> prepareSaveFileOnBackground(call, content));
+    }
+
+    private void prepareSaveFileOnBackground(PluginCall call, String content) {
+        File stagedFile = null;
+        try {
+            File exportDirectory = new File(getContext().getCacheDir(), "exports");
+            if (!exportDirectory.isDirectory() && !exportDirectory.mkdirs()) {
+                call.reject("无法创建存档临时目录");
+                return;
+            }
+            String token = java.util.UUID.randomUUID().toString() + ".json";
+            stagedFile = new File(exportDirectory, token);
+            try (BufferedWriter writer = new BufferedWriter(
+                new OutputStreamWriter(new FileOutputStream(stagedFile), StandardCharsets.UTF_8))) {
+                writer.write(content);
+            }
+
+            JSObject response = new JSObject();
+            response.put("token", token);
+            call.resolve(response);
+        } catch (Exception exception) {
+            if (stagedFile != null) {
+                stagedFile.delete();
+            }
+            call.reject("无法准备导出存档", exception);
+        }
+    }
+
+    @PluginMethod
+    public void saveFile(PluginCall call) {
+        String filename = call.getString("filename", "霍格沃兹存档.hp-save.json");
+        String token = call.getString("token");
+        if (token == null || token.isEmpty()) {
+            call.reject("导出存档临时文件无效");
             return;
         }
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("application/json");
         intent.putExtra(Intent.EXTRA_TITLE, filename);
-        saveCallContent = content;
         startActivityForResult(call, intent, "handleSaveFile");
     }
 
-    private String saveCallContent;
+    private File resolveStagedExport(String token) throws Exception {
+        File exportDirectory = new File(getContext().getCacheDir(), "exports").getCanonicalFile();
+        File stagedFile = new File(exportDirectory, token).getCanonicalFile();
+        String directoryPath = exportDirectory.getPath() + File.separator;
+        if (!stagedFile.getPath().startsWith(directoryPath)) {
+            throw new IllegalArgumentException("导出存档临时文件无效");
+        }
+        return stagedFile;
+    }
 
     @ActivityCallback
     private void handleSaveFile(PluginCall call, ActivityResult result) {
-        String content = saveCallContent;
-        saveCallContent = null;
+        String token = call.getString("token");
+        File stagedFile = null;
+        try {
+            if (token != null && !token.isEmpty()) {
+                stagedFile = resolveStagedExport(token);
+            }
+        } catch (Exception exception) {
+            call.reject("导出存档临时文件无效", exception);
+            return;
+        }
         if (result == null || result.getResultCode() != Activity.RESULT_OK || result.getData() == null) {
+            deleteStagedExport(stagedFile);
             call.reject("已取消导出存档");
             return;
         }
         Uri uri = result.getData().getData();
-        if (uri == null || content == null) {
+        if (uri == null || stagedFile == null || !stagedFile.isFile()) {
+            deleteStagedExport(stagedFile);
             call.reject("未选择存档保存位置");
             return;
         }
-        try (OutputStream output = getContext().getContentResolver().openOutputStream(uri)) {
+        try (InputStream input = new BufferedInputStream(new FileInputStream(stagedFile));
+             OutputStream output = getContext().getContentResolver().openOutputStream(uri)) {
             if (output == null) {
                 call.reject("无法打开存档保存位置");
                 return;
             }
-            output.write(content.getBytes(StandardCharsets.UTF_8));
+            byte[] buffer = new byte[8192];
+            int count;
+            while ((count = input.read(buffer)) != -1) {
+                output.write(buffer, 0, count);
+            }
             output.flush();
             JSObject response = new JSObject();
             response.put("saved", true);
@@ -188,6 +252,14 @@ public class PythonBridgePlugin extends Plugin {
             call.resolve(response);
         } catch (Exception exception) {
             call.reject("无法写入存档文件", exception);
+        } finally {
+            deleteStagedExport(stagedFile);
+        }
+    }
+
+    private void deleteStagedExport(File stagedFile) {
+        if (stagedFile != null && stagedFile.exists() && !stagedFile.delete()) {
+            Log.w("PythonBridge", "Unable to delete staged export: " + stagedFile.getAbsolutePath());
         }
     }
 }

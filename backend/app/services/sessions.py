@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -9,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.core.config import get_settings
 from backend.app.content.attributes import initial_dimensions, initial_resources
+from backend.app.content.eras import ERA_BY_ID
 from backend.app.models import (
     GameSession,
     JournalEntry,
@@ -122,7 +124,6 @@ def initial_player_state() -> dict[str, Any]:
             "collections": [],
         },
         "notifications": [],
-        "letters": [],
         "lifecycle": {"status": "normal"},
     }
 
@@ -327,9 +328,18 @@ def _import_name(name: str) -> str:
 
 def import_session(db: Session, payload: SaveExport) -> GameSession:
     session_data = payload.session
+    era_id = (
+        session_data.era_id
+        if session_data.era_id in ERA_BY_ID
+        else "second_generation"
+    )
+    imported_player_state = _normalize_imported_player_state(
+        payload.player_state,
+        era_id,
+    )
     game_session = GameSession(
         name=_import_name(session_data.name),
-        era_id=session_data.era_id,
+        era_id=era_id,
         rule_version="v1",
         content_version="v1",
         status=session_data.status,
@@ -338,7 +348,7 @@ def import_session(db: Session, payload: SaveExport) -> GameSession:
     db.add(game_session)
     db.flush()
 
-    db.add(PlayerState(session_id=game_session.id, state=payload.player_state))
+    db.add(PlayerState(session_id=game_session.id, state=imported_player_state))
 
     for item in payload.npc_states:
         db.add(
@@ -489,12 +499,47 @@ def import_session(db: Session, payload: SaveExport) -> GameSession:
     return game_session
 
 
+def _normalize_imported_player_state(
+    player_state: dict[str, Any],
+    era_id: str,
+) -> dict[str, Any]:
+    """把旧存档和错误时代标记收束到可安全解释的状态。"""
+    state = deepcopy(player_state)
+    if era_id == "modern":
+        return state
+
+    # 现代字段不能进入子世代提示词；offset_rate 仍保留给旧世界线逻辑。
+    state.pop("modern_arc", None)
+    worldline = state.get("worldline")
+    if isinstance(worldline, dict):
+        state["worldline"] = {
+            key: value
+            for key, value in worldline.items()
+            if key
+            not in {
+                "mode",
+                "temporal_disturbance",
+                "temporal_stability",
+                "last_source",
+                "triggered_thresholds",
+                "current_timeline_id",
+                "memory_status",
+            }
+        }
+    return state
+
+
 def list_journal(db: Session, session_id: str) -> list[JournalEntry]:
     return list(
         db.scalars(
             select(JournalEntry)
+            .outerjoin(TurnRecord, JournalEntry.turn_id == TurnRecord.id)
             .where(JournalEntry.session_id == session_id)
-            .order_by(JournalEntry.created_at.desc())
+            .order_by(
+                TurnRecord.sequence.desc().nullslast(),
+                JournalEntry.created_at.desc(),
+                JournalEntry.id.desc(),
+            )
         )
     )
 

@@ -1,3 +1,4 @@
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
@@ -59,9 +60,12 @@ def _add_turns(db: Session, session_id: str, start: int, end: int) -> None:
             )
 
 
-def test_story_arc_freezes_first_25_nodes_and_keeps_new_fallback_nodes() -> None:
+@pytest.mark.parametrize("era_id", ["second_generation", "modern"])
+def test_story_arc_freezes_first_25_nodes_and_keeps_new_fallback_nodes(
+    era_id: str,
+) -> None:
     db = _database()
-    session = GameSession(name="测试", era_id="second_generation", state_version=35)
+    session = GameSession(name="测试", era_id=era_id, state_version=35)
     db.add(session)
     db.flush()
     _add_turns(db, session.id, 1, 35)

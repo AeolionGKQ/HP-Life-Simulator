@@ -70,7 +70,7 @@ ERAS: tuple[dict[str, Any], ...] = (
             "阻止德尔菲利用被改写的时间线让伏地魔归来。"
         ),
         "atmosphere": "新书页油墨、暖炉灰烬、庭院晨霜、石缝里发酵的旧秘密。",
-        "available": False,
+        "available": True,
     },
 )
 

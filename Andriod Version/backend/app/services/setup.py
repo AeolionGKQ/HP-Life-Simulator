@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.app.content.modern_cast import MODERN_CAST
 from backend.app.content.setup import STARTING_POINT_IDS, get_setup_step
 from backend.app.content.eras import ERA_BY_ID, get_era
 from backend.app.content.origins import normalize_origin_id
@@ -18,7 +19,7 @@ from backend.app.models import (
     PlayerState,
     Relationship,
 )
-from backend.app.schemas.game import SetupAnswer, SetupNavigate, SetupView
+from backend.app.schemas.game import SetupAnswer, SetupNavigate, SetupOption, SetupView
 
 
 SETUP_FINAL_STEP = 18
@@ -33,10 +34,13 @@ def get_setup_view(game_session: GameSession, player_state: PlayerState) -> Setu
         if setup.get("completed")
         else min(int(setup.get("current_step", 1)), SETUP_FINAL_STEP)
     )
+    current = get_setup_step(current_step)
+    if game_session.era_id == "modern":
+        current = _modern_setup_step(current)
     return SetupView(
         current_step=current_step,
         completed=bool(setup.get("completed", False)),
-        current=get_setup_step(current_step),
+        current=current,
         answers=setup.get("answers", {}),
         era_id=game_session.era_id,
         attribute_initialization=state.get("attribute_initialization", {}),
@@ -78,6 +82,8 @@ def save_setup_answer(
         starting_point = _starting_point_id(payload.answer)
         if starting_point not in STARTING_POINT_IDS:
             raise ValueError("剧情起点只能从当前提供的预设节点中选择")
+        if game_session.era_id == "modern" and starting_point != "platform_nine_three_quarters":
+            raise ValueError("现代线第一版固定从2020年9月1日的九又四分之三站台开始")
 
     answers = setup.setdefault("answers", {})
     answers[str(payload.step)] = payload.answer
@@ -135,9 +141,9 @@ def confirm_setup(
     _materialize_player_state(state, answers, game_session.era_id)
     game_session.status = "initializing"
     player_state.state = state
-    _seed_npcs_and_relationships(db, game_session.id)
+    _seed_npcs_and_relationships(db, game_session.id, game_session.era_id)
     db.flush()
-    seed_initial_friends(db, game_session.id, answers.get("13"))
+    seed_initial_friends(db, game_session.id, answers.get("13"), game_session.era_id)
     db.commit()
     db.refresh(player_state)
     db.refresh(game_session)
@@ -151,6 +157,9 @@ def _materialize_player_state(
 ) -> None:
     birthday = _normalize_answer(answers.get("4", "1980-09-01"))
     starting_point = _starting_point_id(answers.get("14"))
+    is_modern = era_id == "modern"
+    if is_modern:
+        starting_point = "platform_nine_three_quarters"
     era = get_era(era_id)
     era_start_year = int(str(era["years"]).split("–", 1)[0].replace("+", ""))
     starts_in_september = starting_point in {
@@ -271,6 +280,110 @@ def _materialize_player_state(
     school["owl_results"] = {}
     school["newt_results"] = {}
     state["school"]["house"] = _normalize_answer(answers.get("15", "未分院"))
+    if is_modern:
+        _materialize_modern_state(state, answers)
+
+
+def _materialize_modern_state(
+    state: dict[str, Any],
+    answers: dict[str, Any],
+) -> None:
+    """将通用角色答案收束到现代线固定的四年级开局。"""
+    state["identity"]["age_band"] = (
+        "minor" if int(state["identity"].get("age", 0)) < 18 else "adult"
+    )
+    state["story_milestones"] = {
+        **state.get("story_milestones", {}),
+        "wand_obtained": True,
+        "sorting_completed": True,
+    }
+    state["current_context"] = {
+        "datetime": "2020-09-01T10:30:00+00:00",
+        "current_date": "2020-09-01",
+        "period": "morning",
+        "location_id": "platform_nine_three_quarters",
+        "activity": "platform_nine_three_quarters",
+    }
+    school = state.setdefault("school", {})
+    school.update(
+        {
+            "grade": "year_4",
+            "enrollment_started": True,
+            "sorting_completed": True,
+            "school_year": "2020-2021",
+            "grade_started_year": 2020,
+            "last_grade_promotion_key": None,
+            "last_course_progression_year": None,
+            "term": "autumn",
+            "active_courses": [],
+            "elective_courses": [],
+            "course_selection": None,
+            "course_history": [],
+            "owl_results": {},
+            "newt_results": {},
+        }
+    )
+    state["worldline"] = {
+        "mode": "temporal_disturbance",
+        "offset_rate": 0.0,
+        "delta": 0.0,
+        "last_delta": 0.0,
+        "reason": "现代线刚从2020年的站台开始",
+        "temporal_disturbance": 0.0,
+        "temporal_stability": 100.0,
+        "last_source": None,
+        "triggered_thresholds": [],
+        "current_timeline_id": "original_2020",
+        "memory_status": "original",
+        "affected_nodes": [],
+    }
+    state["modern_arc"] = {
+        "phase_id": "modern_school_arrival",
+        "temporal_clue_level": 0,
+        "albus_trust": 0,
+        "scorpius_trust": 0,
+        "rose_trust": 0,
+        "delphi_suspicion": 0,
+        "time_turner_status": "unknown",
+        "cedric_anchor_status": "untouched",
+    }
+
+
+def _modern_setup_step(step: Any) -> Any:
+    if step.step == 13:
+        modern_options = [
+                SetupOption(
+                    id=item["npc_id"],
+                    label=item["name"],
+                    description=item["role"],
+                    value=item["name"],
+                    appendable=True,
+                )
+            for item in MODERN_CAST
+            if "学生" in item["role"]
+        ]
+        return step.model_copy(
+            update={
+                "description": "可选择现代线同期生作为初始好友，也可以输入自定义姓名。",
+                "options": modern_options,
+            }
+        )
+    if step.step == 14:
+        return step.model_copy(
+            update={
+                "title": "固定剧情起点",
+                "description": "现代线第一版统一从2020年9月1日、九又四分之三站台驶向霍格沃茨的列车前开始。",
+                "options": [
+                    SetupOption(
+                        id="modern_platform_arrival",
+                        label="2020年9月1日·九又四分之三站台",
+                        description="蒸汽、行李车和即将出发的列车构成现代线的共同开场。",
+                        value="platform_nine_three_quarters",
+                    )
+                ],
+            }
+        )
+    return step
 
 
 def _normalize_answer(value: Any) -> str:
@@ -324,7 +437,11 @@ def _starting_point_id(value: Any) -> str:
     return mapping.get(normalized, normalized)
 
 
-def _seed_npcs_and_relationships(db: Session, session_id: str) -> None:
+def _seed_npcs_and_relationships(
+    db: Session,
+    session_id: str,
+    era_id: str = "second_generation",
+) -> None:
     existing = db.scalar(
         select(NPCState).where(NPCState.session_id == session_id).limit(1)
     )
@@ -417,7 +534,40 @@ def _seed_npcs_and_relationships(db: Session, session_id: str) -> None:
         "george_weasley": 13,
         "cedric_diggory": 14,
     }
+    if era_id == "modern":
+        npc_definitions = [
+            (
+                item["npc_id"],
+                item["name"],
+                item["role"],
+                item["personality"],
+            )
+            for item in MODERN_CAST
+        ]
+    modern_cast_by_id = {
+        item["npc_id"]: item for item in MODERN_CAST
+    } if era_id == "modern" else {}
+    modern_ages = {
+        "albus_potter": 14,
+        "scorpius_malfoy": 14,
+        "rose_granger_weasley": 14,
+        "polly_chapman": 14,
+        "karl_jenkins": 14,
+        "craig_bowker_junior": 14,
+        "delphini": 24,
+        "harry_potter": 40,
+        "draco_malfoy": 40,
+        "hermione_granger": 41,
+        "minerva_mcgonagall": 80,
+        "amos_diggory": 60,
+        "cedric_diggory": 19,
+    }
     for npc_id, name, role, personality in npc_definitions:
+        modern_info = modern_cast_by_id.get(npc_id, {})
+        is_student = role == "学生" or (
+            era_id == "modern" and "学生" in role
+        )
+        age_reference_date = "2020-09-01" if era_id == "modern" else "1991-07-01"
         db.add(
             NPCState(
                 session_id=session_id,
@@ -427,15 +577,27 @@ def _seed_npcs_and_relationships(db: Session, session_id: str) -> None:
                     "name": name,
                     "role": role,
                     "personality": personality,
-                    "age": student_ages.get(npc_id, 11) if role == "学生" else 50,
-                    "location_id": "hogwarts" if role == "教授" else "unknown",
+                    "age": (
+                        modern_ages.get(npc_id, 14)
+                        if era_id == "modern"
+                        else student_ages.get(npc_id, 11) if is_student else 50
+                    ),
+                    "age_band": "minor" if (
+                        modern_ages.get(npc_id, 14) if era_id == "modern"
+                        else student_ages.get(npc_id, 11) if is_student else 50
+                    ) < 18 else "adult",
+                    "location_id": (
+                        "platform_nine_three_quarters"
+                        if era_id == "modern" and is_student
+                        else "hogwarts" if role in {"教授", "校长"} else "unknown"
+                    ),
                     "schedule": [],
-                    "goals": [],
-                    "fears": [],
+                    "goals": list(modern_info.get("goals", [])),
+                    "fears": list(modern_info.get("fears", [])),
                     "secrets": [],
                     "emotion": "neutral",
                     "origin": "preset",
-                    "age_reference_date": "1991-07-01",
+                    "age_reference_date": age_reference_date,
                 },
             )
         )
@@ -464,6 +626,7 @@ def seed_initial_friends(
     db: Session,
     session_id: str,
     raw_answer: Any,
+    era_id: str = "second_generation",
 ) -> None:
     selected_names = [
         value.strip()
@@ -489,6 +652,12 @@ def seed_initial_friends(
         "弗雷德·韦斯莱": "fred_weasley",
         "乔治·韦斯莱": "george_weasley",
         "塞德里克·迪戈里": "cedric_diggory",
+        "阿不思·西弗勒斯·波特": "albus_potter",
+        "斯科皮·马尔福": "scorpius_malfoy",
+        "罗丝·格兰杰-韦斯莱": "rose_granger_weasley",
+        "波莉·查普曼": "polly_chapman",
+        "卡尔·詹金斯": "karl_jenkins",
+        "克雷格·鲍克二世": "craig_bowker_junior",
     }
     existing_relationships = {
         item.target_id: item
@@ -524,9 +693,11 @@ def seed_initial_friends(
                     "name": name,
                     "role": "学生",
                     "personality": "由玩家在创建角色时设定的童年好友",
-                    "age": 11,
+                    "age": 14 if era_id == "modern" else 11,
                     "age_band": "minor",
-                    "age_reference_date": "1991-07-01",
+                    "age_reference_date": (
+                        "2020-09-01" if era_id == "modern" else "1991-07-01"
+                    ),
                     "location_id": "unknown",
                     "schedule": [],
                     "goals": [],

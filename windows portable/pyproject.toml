@@ -1,0 +1,31 @@
+[project]
+name = "hp-simulator"
+version = "3.0.0"
+description = "本地运行的霍格沃兹人生模拟器"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115,<1",
+    "httpx>=0.28,<1",
+    "pydantic>=2.10,<3",
+    "sqlalchemy>=2.0,<3",
+    "tomli-w>=1.1,<2",
+    "uvicorn[standard]>=0.34,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3,<9",
+    "pytest-asyncio>=0.25,<1",
+]
+
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["backend", "backend.*", "launcher", "launcher.*"]
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests", "launcher/tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"

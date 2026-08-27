@@ -5,6 +5,7 @@ import json
 from typing import Any, Iterable
 
 from backend.app.content.eras import get_era
+from backend.app.content.modern_cast import modern_cast_index
 from backend.app.content.school import normalize_grade
 
 
@@ -213,6 +214,122 @@ SECOND_GENERATION_NODES: tuple[dict[str, Any], ...] = (
 )
 
 
+MODERN_FRAME: dict[str, Any] = {
+    "opening_date": "2020-09-01",
+    "opening_scene": "九又四分之三站台的蒸汽掠过人群。战争已经成为历史，但波特、马尔福和格兰杰-韦斯莱的姓氏仍然牵动着每一道目光。",
+    "historical_mood": "战后二十余年的稳定表面下，下一代仍承受家族声望、流言、创伤和未解决的历史问题。",
+    "world_condition": "霍格沃茨正在正常运转，麦格校长守护学校秩序；旧时间魔法的痕迹则可能把过去重新带回现在。",
+    "core_atmosphere": (
+        "新书页的油墨",
+        "修复后石墙上仍未消失的裂痕",
+        "站台蒸汽和秋日晨霜",
+        "晚宴上被刻意避开的战争旧事",
+        "画像记忆发生错位前短促的钟声",
+    ),
+    "mainline_summary": "2020 年起，玩家在下一代学生之间建立自己的校园生活，并自行决定是否接触围绕塞德里克、时间转换器和德尔菲展开的时间危机。",
+}
+
+
+MODERN_ARCS: tuple[dict[str, Any], ...] = (
+    {
+        "id": "modern_school_arrival",
+        "period": "2020年9月1日—9月15日",
+        "start_date": "2020-09-01",
+        "end_date": "2020-09-15",
+        "title": "重新进入城堡",
+        "summary": "战后校园已经恢复日常，但家族姓氏、同学流言和旧伤仍在新一代之间留下压力。",
+        "anchor_events": ("站台与列车", "分院与晚宴", "校园流言", "修复后的旧墙"),
+        "important_figures": ("阿不思·西弗勒斯·波特", "斯科皮·马尔福", "罗丝·格兰杰-韦斯莱", "米勒娃·麦格"),
+        "active_pressures": ("下一代承受父母声望", "阿不思和斯科皮的友谊受到流言拉扯", "玩家仍可完全建立自己的校园生活"),
+        "freedom_note": "现代主线是背景压力，不是玩家必须加入的任务；接近、观察、竞争或离开都应当成立。",
+    },
+    {
+        "id": "modern_two_slytherins",
+        "period": "2020年9月16日—10月10日",
+        "start_date": "2020-09-16",
+        "end_date": "2020-10-10",
+        "title": "两个斯莱特林",
+        "summary": "阿不思不愿成为父亲的复制品，斯科皮不愿永远为马尔福姓氏辩护；玩家可以成为桥梁、竞争者或旁观者。",
+        "anchor_events": ("同学冲突", "学院关系", "家庭来信", "战后校史争议"),
+        "important_figures": ("阿不思·西弗勒斯·波特", "斯科皮·马尔福", "罗丝·格兰杰-韦斯莱", "波莉·查普曼"),
+        "active_pressures": ("身份压力", "校园舆论", "友谊与竞争"),
+        "freedom_note": "关系变化不等于时间改变；普通争吵、帮助和调查不增加时间扰动。",
+    },
+    {
+        "id": "modern_temporal_echoes",
+        "period": "2020年10月11日—11月30日",
+        "start_date": "2020-10-11",
+        "end_date": "2020-11-30",
+        "title": "时间的残影",
+        "summary": "旧钟自行响起、画像记忆互相矛盾，阿不思和斯科皮开始隐瞒一项可能涉及时间转换器的计划。",
+        "anchor_events": ("旧钟错响", "矛盾画像", "被删除的档案", "塞德里克的不同记录"),
+        "important_figures": ("阿不思·西弗勒斯·波特", "斯科皮·马尔福", "阿莫斯·迪戈里", "德尔菲"),
+        "active_pressures": ("线索是否报告给校方", "玩家是否被邀请进入计划", "调查异常不等于改变历史"),
+        "freedom_note": "玩家可以报告、保密、调查、利用或忽略异常；未真正接触时间因果前，不得制造时间灾难。",
+    },
+    {
+        "id": "modern_aftershock",
+        "period": "2020年12月以后",
+        "start_date": "2020-12-01",
+        "end_date": "9999-12-31",
+        "title": "时间危机的余波",
+        "summary": "时间危机可能已经改变关系、记忆或公共事实，但玩家仍要在新的现实中继续生活并承担选择的后果。",
+        "anchor_events": ("时间干涉", "替代记忆", "历史修复", "校园余波"),
+        "important_figures": ("阿不思·西弗勒斯·波特", "斯科皮·马尔福", "德尔菲", "塞德里克·迪戈里"),
+        "active_pressures": ("时间扰动的后果", "记忆与现实的冲突", "修复或接受改变后的世界"),
+        "freedom_note": "高扰动不等于游戏结束；修复、局部保留、替代线延续和远离核心事件都可以继续生成。",
+    },
+)
+
+
+MODERN_NODES: tuple[dict[str, Any], ...] = (
+    {
+        "id": "modern_school_arrival",
+        "arc_id": "modern_school_arrival",
+        "title": "2020年的开学日",
+        "start_date": "2020-09-01",
+        "end_date": "2020-09-15",
+        "importance": "major",
+        "pressure_summary": "站台、列车和晚宴让玩家第一次看到战后下一代如何被家族姓氏定义。",
+        "possible_player_roles": ("同窗", "旁观者", "流言反驳者", "独立探索者"),
+        "match_terms": ("站台", "列车", "开学", "阿不思", "斯科皮", "罗丝", "霍格沃茨"),
+    },
+    {
+        "id": "modern_slytherin_friendship",
+        "arc_id": "modern_two_slytherins",
+        "title": "两个斯莱特林的友谊",
+        "start_date": "2020-09-01",
+        "end_date": "2020-10-10",
+        "importance": "major",
+        "pressure_summary": "阿不思和斯科皮的友谊跨越两个家族的旧历史，也因此成为流言和家庭压力的目标。",
+        "possible_player_roles": ("朋友", "竞争者", "怀疑者", "信息传递者"),
+        "match_terms": ("阿不思", "斯科皮", "波特", "马尔福", "友谊", "流言", "斯莱特林"),
+    },
+    {
+        "id": "modern_time_turner_clues",
+        "arc_id": "modern_temporal_echoes",
+        "title": "时间转换器的残影",
+        "start_date": "2020-10-11",
+        "end_date": "2021-06-30",
+        "importance": "critical",
+        "pressure_summary": "旧钟、矛盾档案和被隐藏的行踪暗示有人正在接近危险的时间魔法。",
+        "possible_player_roles": ("调查者", "报告者", "保密者", "局外援助者"),
+        "match_terms": ("时间", "时间转换器", "旧钟", "画像", "档案", "异常", "残影"),
+    },
+    {
+        "id": "modern_cedric_anchor",
+        "arc_id": "modern_aftershock",
+        "title": "塞德里克的历史锚点",
+        "start_date": "2020-10-11",
+        "end_date": "9999-12-31",
+        "importance": "critical",
+        "pressure_summary": "改变塞德里克的历史可能让一个人的命运与整个时代的稳定发生冲突。",
+        "possible_player_roles": ("旁观者", "同行者", "保护者", "阻止者", "利用者"),
+        "match_terms": ("塞德里克", "三强争霸赛", "拯救", "历史", "锚点", "过去"),
+    },
+)
+
+
 def get_generation_content(era_id: str) -> dict[str, Any]:
     """返回不会随玩家状态变化的时代内容，供动态上下文计算使用。"""
     era = get_era(era_id)
@@ -222,6 +339,18 @@ def get_generation_content(era_id: str) -> dict[str, Any]:
             "mainline_arcs": [_copy_mapping(arc) for arc in SECOND_GENERATION_ARCS],
             "mainline_nodes": [_copy_mapping(node) for node in SECOND_GENERATION_NODES],
             "freedom_rules": list(FREEDOM_RULES),
+        }
+    if era["id"] == "modern":
+        return {
+            "era_frame": _copy_frame(MODERN_FRAME),
+            "mainline_arcs": [_copy_mapping(arc) for arc in MODERN_ARCS],
+            "mainline_nodes": [_copy_mapping(node) for node in MODERN_NODES],
+            "cast_index": modern_cast_index(),
+            "freedom_rules": list(FREEDOM_RULES)
+            + [
+                "现代线使用时间扰动表达时间因果压力；普通校园生活、对话、课程和关系变化不自动改变时间。",
+                "原著因果只作为背景引导，玩家的实际行动和已经成立的状态优先。",
+            ],
         }
     return {
         "era_frame": {
@@ -301,6 +430,17 @@ def build_generation_context(
         worldline=worldline,
         relevant_nodes=relevant_nodes,
     )
+    if era["id"] == "modern":
+        timeline_phase = _build_modern_timeline_phase(
+            current_date=current_date,
+            school=school,
+            arc=arc,
+            modern_arc=state.get("modern_arc"),
+        )
+        pressure = _build_modern_temporal_pressure(
+            worldline=worldline,
+            relevant_nodes=relevant_nodes,
+        )
 
     return {
         "id": era["id"],
@@ -322,6 +462,90 @@ def build_generation_context(
         "relevant_nodes": relevant_nodes,
         "freedom_rules": list(content["freedom_rules"]),
         "worldline_pressure": pressure,
+        "cast_index": content.get("cast_index", []),
+        "modern_arc": state.get("modern_arc", {}) if era["id"] == "modern" else None,
+    }
+
+
+def _build_modern_timeline_phase(
+    *,
+    current_date: date,
+    school: dict[str, Any],
+    arc: dict[str, Any],
+    modern_arc: Any,
+) -> dict[str, Any]:
+    arc_state = modern_arc if isinstance(modern_arc, dict) else {}
+    phase_id = str(arc_state.get("phase_id") or arc["id"])
+    return {
+        "calendar_date": current_date.isoformat(),
+        "calendar_year": current_date.year,
+        "school_year": school.get("school_year"),
+        "term": school.get("term"),
+        "grade": normalize_grade(school),
+        "phase_id": phase_id,
+        "phase_title": arc["title"],
+        "phase_summary": arc["summary"],
+        "active_pressures": list(arc["active_pressures"][:3]),
+    }
+
+
+def _build_modern_temporal_pressure(
+    *,
+    worldline: dict[str, Any],
+    relevant_nodes: list[dict[str, Any]],
+) -> dict[str, Any]:
+    try:
+        disturbance = float(worldline.get("temporal_disturbance", 0))
+    except (TypeError, ValueError):
+        disturbance = 0.0
+    try:
+        stability = float(worldline.get("temporal_stability", 100))
+    except (TypeError, ValueError):
+        stability = 100.0
+    if disturbance < 10:
+        band = "stable"
+        guidance = "时间结构暂时稳定；普通校园生活不应被解释成时间异常。"
+    elif disturbance < 25:
+        band = "local_echo"
+        guidance = "局部回声开始出现；可以写入轻微记忆冲突，但不能擅自制造大规模替代现实。"
+    elif disturbance < 45:
+        band = "historical_fissure"
+        guidance = "历史出现裂缝；必须承接已经成立的异常及其人物代价。"
+    elif disturbance < 65:
+        band = "time_shadow"
+        guidance = "时间重影正在侵入现实；只让相关角色和地点受到可解释的影响。"
+    elif disturbance < 85:
+        band = "reality_split"
+        guidance = "现实已经分叉；原始历史不再自动成立，但玩家行动仍优先。"
+    elif disturbance < 100:
+        band = "collapse_eve"
+        guidance = "时间结构接近崩塌；每次行动都应保留明确的后果和选择空间。"
+    else:
+        band = "temporal_disaster"
+        guidance = "时间灾难已经发生；游戏继续在修复、替代现实或余波中生成。"
+    triggered = worldline.get("triggered_thresholds", [])
+    return {
+        "mode": "temporal_disturbance",
+        "temporal_disturbance": disturbance,
+        "temporal_stability": stability,
+        "band": band,
+        "last_source": worldline.get("last_source"),
+        "current_timeline_id": worldline.get("current_timeline_id", "original_2020"),
+        "memory_status": worldline.get("memory_status", "original"),
+        "triggered_thresholds": list(triggered) if isinstance(triggered, list) else [],
+        "pending_consequence": (
+            worldline.get("pending_consequence")
+            if isinstance(worldline.get("pending_consequence"), dict)
+            else None
+        ),
+        "changed_nodes": [
+            node for node in relevant_nodes if node.get("status") == "altered"
+        ],
+        "approaching_nodes": [
+            node for node in relevant_nodes if node.get("status") == "approaching"
+        ],
+        "narrative_guidance": guidance,
+        "temporal_rule": "普通校园行动、对话、调查和关系变化不增加时间扰动；只有真实触碰时间因果才允许增加。",
     }
 
 

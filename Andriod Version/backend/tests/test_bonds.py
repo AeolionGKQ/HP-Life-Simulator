@@ -162,6 +162,33 @@ def test_numeric_relationship_change_requires_reason_and_evidence() -> None:
     )
 
 
+@pytest.mark.parametrize("era_id", ["second_generation", "modern"])
+def test_relationship_change_runs_in_both_eras(era_id: str) -> None:
+    relationship = _relationship()
+    next_state, changes = apply_turn_rules(
+        _state(age=14),
+        [relationship],
+        _response(
+            [
+                {
+                    "npc_id": "ivy_moore",
+                    "affinity_delta": 3,
+                    "trust_delta": 4,
+                    "reason": "共同完成了一次调查",
+                    "evidence": "本轮发生了明确互动",
+                }
+            ]
+        ),
+        npc_ages={"ivy_moore": 14},
+        era_id=era_id,
+    )
+
+    assert relationship.state["affinity"] == 23
+    assert relationship.state["trust"] == 14
+    assert changes["relationships"][0]["npc_id"] == "ivy_moore"
+    assert next_state["romance"]["status"] == "single"
+
+
 def test_two_minors_can_date_but_adult_minor_pair_is_rejected() -> None:
     minor_relationship = _relationship()
     state, _ = apply_turn_rules(

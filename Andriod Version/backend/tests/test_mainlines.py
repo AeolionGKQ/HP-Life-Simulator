@@ -97,17 +97,32 @@ def test_changed_node_is_preserved_as_altered_pressure() -> None:
     assert "因果" in changed[0]["freedom_note"]
 
 
-def test_other_eras_keep_compatible_fallback_context() -> None:
+def test_modern_context_uses_temporal_disturbance_and_modern_cast() -> None:
     context = build_generation_context(
         era_id="modern",
-        player_state=_state(current_date="2026-01-01"),
+        player_state={
+            **_state(current_date="2020-09-01", grade="year_4"),
+            "modern_arc": {"phase_id": "modern_school_arrival"},
+            "worldline": {
+                "mode": "temporal_disturbance",
+                "temporal_disturbance": 12,
+                "temporal_stability": 88,
+                "current_timeline_id": "original_2020",
+                "triggered_thresholds": [],
+            },
+        },
     )
 
     assert context["id"] == "modern"
-    assert context["mainline_phase"]["id"] == "modern"
+    assert context["mainline_phase"]["id"] == "modern_school_arrival"
     assert context["mainline_phase"]["summary"]
     assert context["era_frame"]["core_atmosphere"]
-    assert context["timeline_phase"]["grade"] == "year_1"
+    assert context["timeline_phase"]["phase_id"] == "modern_school_arrival"
+    assert context["timeline_phase"]["grade"] == "year_4"
+    assert context["worldline_pressure"]["mode"] == "temporal_disturbance"
+    assert context["worldline_pressure"]["band"] == "local_echo"
+    assert context["worldline_pressure"]["temporal_stability"] == 88
+    assert any(item["npc_id"] == "albus_potter" for item in context["cast_index"])
 
 
 def test_story_after_battle_uses_postwar_phase() -> None:

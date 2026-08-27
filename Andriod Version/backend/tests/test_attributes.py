@@ -138,6 +138,54 @@ def test_inventory_removal_keeps_the_existing_item_name_for_audit() -> None:
     assert changes["inventory"]["removed"][0]["name"] == "无名旧盒"
 
 
+@pytest.mark.parametrize("era_id", ["second_generation", "modern"])
+def test_shared_skill_item_and_trait_rules_run_in_both_eras(era_id: str) -> None:
+    state = _state()
+    state["skills"] = {
+        "wandwork": {
+            "id": "wandwork",
+            "name": "魔杖运用",
+            "description": "基础魔杖运用",
+            "level": 1,
+            "experience": 0,
+        }
+    }
+    next_state, changes = apply_turn_rules(
+        state,
+        [],
+        _response(
+            {
+                "skill_deltas": {"wandwork": 2},
+                "inventory_add": [
+                    {
+                        "item_id": "test_item",
+                        "name": "测试物品",
+                        "description": "跨世代测试物品",
+                        "quantity": 1,
+                    }
+                ],
+                "trait_add": [
+                    {
+                        "id": "test_trait",
+                        "name": "测试词条",
+                        "description": "跨世代测试词条",
+                        "polarity": "positive",
+                        "reason": "测试",
+                    }
+                ],
+            }
+        ),
+        era_id=era_id,
+    )
+
+    assert next_state["skills"]["wandwork"]["level"] == 3
+    assert next_state["inventory"][0]["item_id"] == "test_item"
+    assert next_state["traits"][0]["id"] == "test_trait"
+    assert "wandwork" in changes["skills"]
+    assert changes["inventory"]["added"][0]["item_id"] == "test_item"
+    assert changes["traits"]["added"][0]["id"] == "test_trait"
+
+
 def test_health_zero_causes_death_and_sanity_zero_causes_collapse() -> None:
     death, _ = apply_turn_rules(
         _state(),

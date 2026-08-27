@@ -34,7 +34,10 @@ def test_four_eras_match_world_bible() -> None:
         ("现代", "2020+"),
     ]
     assert all(era["mainline"] for era in eras)
-    assert [era["id"] for era in eras if era["available"]] == ["second_generation"]
+    assert [era["id"] for era in eras if era["available"]] == [
+        "second_generation",
+        "modern",
+    ]
 
 
 async def test_llm_connection_formats_object_content(monkeypatch) -> None:

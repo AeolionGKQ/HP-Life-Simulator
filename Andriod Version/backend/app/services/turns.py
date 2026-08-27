@@ -34,6 +34,7 @@ from backend.app.models import (
 from backend.app.providers.openai_compatible import OpenAICompatibleProvider
 from backend.app.prompts.turn import TURN_OUTPUT_PROTOCOL, build_turn_messages
 from backend.app.rules.state import apply_turn_rules, refresh_romance_summary
+from backend.app.rules.timeline import apply_timeline_effect
 from backend.app.schemas.game import (
     ActionRequest,
     AppliedPlayerChanges,
@@ -807,11 +808,12 @@ async def _reshape_latest_turn(
     response.turn.current_date = original_response.turn.current_date
     response.turn.location_id = original_response.turn.location_id
     response.turn.location_name = original_response.turn.location_name
-    response.worldline.offset_rate = max(
-        settings.game.worldline_min,
-        min(settings.game.worldline_max, response.worldline.offset_rate),
-    )
-    response.worldline.delta = response.worldline.offset_rate - previous_offset
+    if game_session.era_id != "modern":
+        response.worldline.offset_rate = max(
+            settings.game.worldline_min,
+            min(settings.game.worldline_max, response.worldline.offset_rate),
+        )
+        response.worldline.delta = response.worldline.offset_rate - previous_offset
 
     _restore_turn_state_snapshot(db, player_state, snapshot)
     npcs = list(
@@ -832,6 +834,7 @@ async def _reshape_latest_turn(
         relationships,
         response,
         npc_ages=npc_ages,
+        era_id=game_session.era_id,
     )
     creation_result = _apply_relationship_creations(
         db,
@@ -854,7 +857,20 @@ async def _reshape_latest_turn(
         authoritative_changes["relationship_creation_rejections"] = creation_result[
             "rejected"
         ]
-    state["worldline"] = response.worldline.model_dump()
+    if game_session.era_id == "modern":
+        authoritative_worldline = apply_timeline_effect(
+            game_session.era_id,
+            state,
+            response,
+            action=action,
+        )
+        response.worldline.offset_rate = 0.0
+        response.worldline.delta = authoritative_worldline["delta"]
+        response.worldline.reason = authoritative_worldline["reason"]
+        response.worldline.affected_nodes = authoritative_worldline["affected_nodes"]
+    else:
+        authoritative_worldline = response.worldline.model_dump(mode="json")
+    state["worldline"] = authoritative_worldline
     if state.get("lifecycle", {}).get("status") == "dead":
         game_session.status = "ended"
     player_state.state = state
@@ -879,10 +895,10 @@ async def _reshape_latest_turn(
             "previous_sequence": latest.sequence,
         },
         "visible": visible_changes,
-        "worldline": response.worldline.model_dump(),
+        "worldline": authoritative_worldline,
     }
     latest.memory_update = response.memory_update.model_dump()
-    latest.worldline = response.worldline.model_dump()
+    latest.worldline = authoritative_worldline
     latest.prompt_version = "v1.8-reshape"
     latest.model_name = settings.llm.model
     latest.state_version_before = state_version_before
@@ -1084,11 +1100,12 @@ async def generate_turn(
             raise TurnGenerationError("模型在一次补查后仍未返回正式剧情")
 
     response = parsed_response
-    response.worldline.offset_rate = max(
-        settings.game.worldline_min,
-        min(settings.game.worldline_max, response.worldline.offset_rate),
-    )
-    response.worldline.delta = response.worldline.offset_rate - previous_offset
+    if game_session.era_id != "modern":
+        response.worldline.offset_rate = max(
+            settings.game.worldline_min,
+            min(settings.game.worldline_max, response.worldline.offset_rate),
+        )
+        response.worldline.delta = response.worldline.offset_rate - previous_offset
 
     accepted_date = _accepted_story_date(
         player_state.state,
@@ -1100,6 +1117,7 @@ async def generate_turn(
         relationships,
         response,
         npc_ages=npc_ages,
+        era_id=game_session.era_id,
     )
     creation_result = _apply_relationship_creations(
         db,
@@ -1122,7 +1140,20 @@ async def generate_turn(
         authoritative_changes["relationship_creation_rejections"] = creation_result[
             "rejected"
         ]
-    state["worldline"] = response.worldline.model_dump()
+    if game_session.era_id == "modern":
+        authoritative_worldline = apply_timeline_effect(
+            game_session.era_id,
+            state,
+            response,
+            action=action,
+        )
+        response.worldline.offset_rate = 0.0
+        response.worldline.delta = authoritative_worldline["delta"]
+        response.worldline.reason = authoritative_worldline["reason"]
+        response.worldline.affected_nodes = authoritative_worldline["affected_nodes"]
+    else:
+        authoritative_worldline = response.worldline.model_dump(mode="json")
+    state["worldline"] = authoritative_worldline
     lifecycle_status = state.get("lifecycle", {}).get("status")
     if lifecycle_status == "dead":
         game_session.status = "ended"
@@ -1153,10 +1184,10 @@ async def generate_turn(
             **authoritative_changes,
             "state_snapshot": state_snapshot,
             "visible": visible_changes,
-            "worldline": response.worldline.model_dump(),
+            "worldline": authoritative_worldline,
         },
         memory_update=response.memory_update.model_dump(),
-        worldline=response.worldline.model_dump(),
+        worldline=authoritative_worldline,
         prompt_version="v1.8-milestones",
         model_name=settings.llm.model,
         state_version_before=payload.expected_state_version,
