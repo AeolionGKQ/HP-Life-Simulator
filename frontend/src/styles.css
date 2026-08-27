@@ -834,6 +834,8 @@ textarea:focus { border-color: var(--accent); background: #101610; outline: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .config-modal { animation: none !important; }
+
   *,
   *::before,
   *::after {
