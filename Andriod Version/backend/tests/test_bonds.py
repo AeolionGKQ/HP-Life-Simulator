@@ -162,7 +162,10 @@ def test_numeric_relationship_change_requires_reason_and_evidence() -> None:
     )
 
 
-@pytest.mark.parametrize("era_id", ["second_generation", "modern"])
+@pytest.mark.parametrize(
+    "era_id",
+    ["dumbledore_era", "parent_generation", "second_generation", "modern"],
+)
 def test_relationship_change_runs_in_both_eras(era_id: str) -> None:
     relationship = _relationship()
     next_state, changes = apply_turn_rules(

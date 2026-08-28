@@ -82,6 +82,8 @@ export function GameView({
   const [storyArcs, setStoryArcs] = useState<StoryArc[]>([]);
   const [storyArcStatus, setStoryArcStatus] = useState<StoryArcStatus | null>(null);
   const [retryingStoryArc, setRetryingStoryArc] = useState(false);
+  const [compressingStoryArcs, setCompressingStoryArcs] = useState(false);
+  const [storyArcCompressError, setStoryArcCompressError] = useState("");
 
   async function refreshState() {
     const stateResponse = await api.state(sessionId);
@@ -483,6 +485,20 @@ export function GameView({
                 setError(reason instanceof Error ? reason.message : "故事弧重试失败");
               } finally {
                 setRetryingStoryArc(false);
+              }
+            }}
+            compressing={compressingStoryArcs}
+            compressError={storyArcCompressError}
+            onCompress={async () => {
+              setCompressingStoryArcs(true);
+              setStoryArcCompressError("");
+              try {
+                await api.compressStoryArcs(sessionId);
+                setStoryArcs(await api.storyArcs(sessionId));
+              } catch (reason) {
+                setStoryArcCompressError(reason instanceof Error ? reason.message : "故事弧压缩失败");
+              } finally {
+                setCompressingStoryArcs(false);
               }
             }}
           />
@@ -1526,11 +1542,17 @@ function StoryArcPanel({
   status,
   retrying,
   onRetry,
+  compressing,
+  compressError,
+  onCompress,
 }: {
   arcs: StoryArc[];
   status: StoryArcStatus | null;
   retrying: boolean;
   onRetry: () => Promise<void>;
+  compressing: boolean;
+  compressError: string;
+  onCompress: () => Promise<void>;
 }) {
   const failed = status?.latest_failed_job;
   return (
@@ -1542,6 +1564,22 @@ function StoryArcPanel({
         </div>
         {status?.active_job && <span className="state-pill">正在整理</span>}
       </div>
+      <div className="story-arc-actions">
+        <button
+          className="secondary-button"
+          type="button"
+          onClick={() => void onCompress()}
+          disabled={compressing || arcs.length < 2}
+        >
+          {compressing ? "正在压缩…" : "压缩全部故事弧"}
+        </button>
+        <span className="story-arc-actions-hint">
+          {arcs.length < 2
+            ? "至少需要两条故事弧才能压缩。"
+            : "把现有故事弧精简合并成一条，继承覆盖轮次并清理过期线索。"}
+        </span>
+      </div>
+      {compressError && <div className="config-message">{compressError}</div>}
       {failed && (
         <div className="config-message">
           故事弧整理失败：{failed.error ?? "未知错误"}

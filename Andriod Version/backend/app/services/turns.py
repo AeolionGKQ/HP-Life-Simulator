@@ -22,6 +22,7 @@ from backend.app.content.bonds import (
     normalize_relationship_state,
     safe_bounded_int,
 )
+from backend.app.content.parent_cast import parent_adult_profile
 from backend.app.models import (
     GameSession,
     JournalEntry,
@@ -828,7 +829,7 @@ async def _reshape_latest_turn(
         player_state.state,
         _parse_story_date(response.turn.current_date),
     )
-    npc_ages = _refresh_npc_ages(npcs, accepted_date)
+    npc_ages = _refresh_npc_ages(npcs, accepted_date, era_id=game_session.era_id)
     state, authoritative_changes = apply_turn_rules(
         player_state.state,
         relationships,
@@ -1010,6 +1011,7 @@ async def generate_turn(
     _refresh_npc_ages(
         npcs,
         _parse_story_date(current_context.get("current_date")),
+        era_id=game_session.era_id,
     )
     story_context = build_story_arc_context(
         db,
@@ -1111,7 +1113,7 @@ async def generate_turn(
         player_state.state,
         response.turn.current_date,
     )
-    npc_ages = _refresh_npc_ages(npcs, accepted_date)
+    npc_ages = _refresh_npc_ages(npcs, accepted_date, era_id=game_session.era_id)
     state, authoritative_changes = apply_turn_rules(
         player_state.state,
         relationships,
@@ -1313,15 +1315,34 @@ def _accepted_story_date(
 def _refresh_npc_ages(
     npcs: list[NPCState],
     story_date: date,
+    *,
+    era_id: str | None = None,
 ) -> dict[str, int | None]:
     ages: dict[str, int | None] = {}
     for npc in npcs:
         npc_state = dict(npc.state) if isinstance(npc.state, dict) else {}
+        if npc_state.get("life_status") == "deceased":
+            # 已故人物不再随剧情日期长大，年龄停在去世时的记录上。
+            ages[npc.npc_id] = npc_state.get("age")
+            continue
         current_age = current_age_for_npc(npc_state, story_date)
         if current_age is not None:
             npc_state["age"] = current_age
             npc_state["age_band"] = age_band(current_age)
             npc_state.setdefault("age_reference_date", story_date.isoformat())
+            if era_id == "parent_generation":
+                adult_profile = parent_adult_profile(npc.npc_id, story_date)
+                if adult_profile:
+                    npc_state.update(
+                        {
+                            "role": adult_profile["role"],
+                            "current_life": adult_profile["current_life"],
+                            "appearance_conditions": adult_profile[
+                                "appearance_conditions"
+                            ],
+                            "life_stage": "adult",
+                        }
+                    )
             npc.state = npc_state
         ages[npc.npc_id] = current_age
     return ages

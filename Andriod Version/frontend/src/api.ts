@@ -536,6 +536,10 @@ export const api = {
     isAndroidNative()
       ? requestPython<StoryArcJob>(`/api/sessions/${id}/story-arcs/retry`, "POST")
       : request<StoryArcJob>(`/api/sessions/${id}/story-arcs/retry`, { method: "POST" }),
+  compressStoryArcs: (id: string) =>
+    isAndroidNative()
+      ? requestPython<StoryArc>(`/api/sessions/${id}/story-arcs/compress`, "POST")
+      : request<StoryArc>(`/api/sessions/${id}/story-arcs/compress`, { method: "POST" }),
   action: (
     id: string,
     payload: {

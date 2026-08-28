@@ -139,3 +139,191 @@ def test_story_after_battle_uses_postwar_phase() -> None:
     assert context["mainline_phase"]["title"] == "战后的余波"
     assert "重新写成正在发生" in context["mainline_phase"]["freedom_note"]
     assert context["timeline_phase"]["phase_id"] == "postwar_aftermath_after_departure"
+
+
+def test_dumbledore_context_uses_hollow_opening_and_full_cast() -> None:
+    context = build_generation_context(
+        era_id="dumbledore_era",
+        player_state=_state(
+            current_date="1892-07-01",
+            grade="not_enrolled",
+            location_id="godrics_hollow",
+        ),
+    )
+
+    assert context["id"] == "dumbledore_era"
+    assert context["era_frame"]["opening_date"] == "1892-07-01"
+    assert "煤油灯" in context["era_frame"]["era_background"]
+    assert context["mainline_phase"]["id"] == "godrics_hollow_summer"
+    assert context["forbidden_figures"]
+    assert "哈利·波特" in context["forbidden_figures"]
+    assert context["available_figures"]
+    assert any(item["name"] == "格里塞尔达·马奇班克斯" for item in context["available_figures"])
+    assert all(
+        item["era_status"] and item["how_to_use"] for item in context["available_figures"]
+    )
+    assert "礼仪" in context["era_frame"]["era_background"]
+    assert "future_timeline" not in context["mainline_phase"]
+
+
+def test_dumbledore_cast_keeps_1899_canon_red_lines() -> None:
+    context = build_generation_context(
+        era_id="dumbledore_era",
+        player_state=_state(
+            current_date="1899-08-10",
+            grade="left_school",
+            location_id="godrics_hollow",
+        ),
+        action={"kind": "free_text", "text": "留在混战现场看着阿利安娜坠落"},
+    )
+
+    cast = {item["npc_id"]: item for item in context["cast_index"]}
+    ariana_rules = " ".join(cast["ariana_dumbledore"]["must_not"])
+    assert "不得确认杀死她的咒语来自谁" in ariana_rules
+    grindelwald_rules = " ".join(cast["gellert_grindelwald"]["must_not"])
+    assert "歇斯底里的杀人狂" in grindelwald_rules
+    assert "纳粹德国" in grindelwald_rules
+    albus_rules = " ".join(cast["albus_dumbledore"]["must_not"])
+    assert "圣人" in albus_rules
+    assert "爱情" in albus_rules
+    assert "以血立誓" in cast["gellert_grindelwald"]["background"]
+
+    fall = next(node for node in context["relevant_nodes"] if node["id"] == "ariana_fall")
+    assert "施法者必须保持未知" in fall["pressure_summary"]
+
+
+def test_dumbledore_aftermath_phase_carries_future_timeline() -> None:
+    context = build_generation_context(
+        era_id="dumbledore_era",
+        player_state=_state(
+            current_date="1900-05-01",
+            grade="left_school",
+            location_id="godrics_hollow",
+        ),
+    )
+
+    assert context["mainline_phase"]["id"] == "greater_good_aftermath"
+    timeline = context["mainline_phase"]["future_timeline"]
+    for keyword in (
+        "圣徒",
+        "纽蒙迦德",
+        "血盟",
+        "1932",
+        "1945",
+        "老魔杖",
+        "硬锚点",
+        "架空历史",
+        "麒麟",
+        "1926",
+        "1927",
+        "留白",
+    ):
+        assert keyword in timeline
+    assert "只有当前日期真正到达对应年份" in timeline
+    assert "约1932年" in timeline
+    assert any(item["npc_id"] == "albus_dumbledore" for item in context["cast_index"])
+    albus = next(item for item in context["cast_index"] if item["npc_id"] == "albus_dumbledore")
+    assert "校长" in albus["must_not"][0]
+    assert albus["background"]
+    assert "更弱" in context["freedom_rules"][-5]
+    assert any(item["name"] == "纽特·斯卡曼德" for item in context["available_figures"])
+
+
+def test_dumbledore_grindelwald_node_waits_until_1899() -> None:
+    early = build_generation_context(
+        era_id="dumbledore_era",
+        player_state=_state(
+            current_date="1892-09-02",
+            grade="year_1",
+            location_id="hogwarts_castle",
+        ),
+    )
+    late = build_generation_context(
+        era_id="dumbledore_era",
+        player_state=_state(
+            current_date="1899-07-20",
+            grade="left_school",
+            location_id="godrics_hollow",
+        ),
+        action={"kind": "free_text", "text": "去找阿不思和那个金发的格林德沃"},
+    )
+
+    assert early["mainline_phase"]["id"] == "brilliant_classmate"
+    assert all(node["id"] != "grindelwald_summer" for node in early["relevant_nodes"])
+    assert late["mainline_phase"]["id"] == "greater_good_summer"
+    assert any(node["id"] == "grindelwald_summer" for node in late["relevant_nodes"])
+
+
+def test_dumbledore_endgame_dates_land_on_expected_phases() -> None:
+    at_fall = build_generation_context(
+        era_id="dumbledore_era",
+        player_state=_state(
+            current_date="1899-08-31",
+            grade="left_school",
+            location_id="godrics_hollow",
+        ),
+        action={"kind": "start_story", "text": "阿不思抱着阿利安娜，格林德沃夺门而逃"},
+    )
+    next_day = build_generation_context(
+        era_id="dumbledore_era",
+        player_state=_state(
+            current_date="1899-09-01",
+            grade="left_school",
+            location_id="godrics_hollow",
+        ),
+    )
+
+    assert at_fall["mainline_phase"]["id"] == "greater_good_summer"
+    fall_node = next(
+        node for node in at_fall["relevant_nodes"] if node["id"] == "ariana_fall"
+    )
+    assert fall_node["status"] == "active"
+    assert "future_timeline" not in at_fall["mainline_phase"]
+
+    assert next_day["mainline_phase"]["id"] == "greater_good_aftermath"
+    assert "future_timeline" in next_day["mainline_phase"]
+
+
+def test_parent_context_uses_1971_platform_and_student_snape() -> None:
+    context = build_generation_context(
+        era_id="parent_generation",
+        player_state=_state(
+            current_date="1971-09-01",
+            grade="year_1",
+            location_id="platform_nine_three_quarters",
+        ),
+    )
+
+    assert context["id"] == "parent_generation"
+    assert context["era_frame"]["opening_date"] == "1971-09-01"
+    assert "摇滚乐" in context["era_frame"]["era_background"]
+    assert context["mainline_phase"]["id"] == "platform_1971"
+    assert any(item["npc_id"] == "severus_snape" for item in context["cast_index"])
+    snape = next(item for item in context["cast_index"] if item["npc_id"] == "severus_snape")
+    assert "教授" in snape["must_not"][0]
+    assert "哈利·波特作为学生或少年" in context["forbidden_figures"]
+
+
+def test_parent_mudblood_node_waits_until_1976() -> None:
+    early = build_generation_context(
+        era_id="parent_generation",
+        player_state=_state(
+            current_date="1972-03-01",
+            grade="year_1",
+            location_id="hogwarts_castle",
+        ),
+    )
+    late = build_generation_context(
+        era_id="parent_generation",
+        player_state=_state(
+            current_date="1976-05-01",
+            grade="year_5",
+            location_id="hogwarts_courtyard",
+        ),
+        action={"kind": "free_text", "text": "去看詹姆当众羞辱斯内普"},
+    )
+
+    assert early["mainline_phase"]["id"] == "marauders_forming"
+    assert all(node["id"] != "snape_worst_memory" for node in early["relevant_nodes"])
+    assert late["mainline_phase"]["id"] == "mudblood_year"
+    assert any(node["id"] == "snape_worst_memory" for node in late["relevant_nodes"])

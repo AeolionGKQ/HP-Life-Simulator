@@ -435,6 +435,8 @@ export const api = {
     request<StoryArcStatus>(`/api/sessions/${id}/story-arcs/status`),
   retryStoryArc: (id: string) =>
     request<StoryArcJob>(`/api/sessions/${id}/story-arcs/retry`, { method: "POST" }),
+  compressStoryArcs: (id: string) =>
+    request<StoryArc>(`/api/sessions/${id}/story-arcs/compress`, { method: "POST" }),
   action: (
     id: string,
     payload: {

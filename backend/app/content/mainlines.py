@@ -5,7 +5,19 @@ import json
 from typing import Any, Iterable
 
 from backend.app.content.eras import get_era
+from backend.app.content.dumbledore_cast import (
+    DUMBLEDORE_AVAILABLE_FIGURES,
+    DUMBLEDORE_ERA_BACKGROUND,
+    DUMBLEDORE_FORBIDDEN_FIGURES,
+    dumbledore_cast_index,
+)
 from backend.app.content.modern_cast import modern_cast_index
+from backend.app.content.parent_cast import (
+    PARENT_AVAILABLE_FIGURES,
+    PARENT_ERA_BACKGROUND,
+    PARENT_FORBIDDEN_FIGURES,
+    parent_cast_index,
+)
 from backend.app.content.school import normalize_grade
 
 
@@ -330,6 +342,485 @@ MODERN_NODES: tuple[dict[str, Any], ...] = (
 )
 
 
+HISTORICAL_FREEDOM_RULES: tuple[str, ...] = (
+    "本世代主线引导必须更弱；没有玩家主动靠近时，不要把原著高潮写成当前场景。",
+    "一轮最多出现一个时代压力，且优先个人生活、课程、天气和在场人物。",
+    "不得因为原著年份到了就传送玩家，也不得让不在场的玩家自动目击关键悲剧。",
+    "需要新NPC时，按本时代自行创建，禁止征用后世角色或尚未出场的人物。",
+    "原著因果只作为背景引导，玩家的实际行动和已经成立的状态优先。",
+)
+
+
+DUMBLEDORE_FRAME: dict[str, Any] = {
+    "opening_date": "1892-07-01",
+    "opening_scene": (
+        "1892年夏，你踏入戈德里克山谷。煤油灯、泥路和拉上的窗帘构成这个时代的第一口空气。"
+        "霍格沃茨的录取通知书已经收到，魔杖、宠物和随身物品都已备齐，只等九月开学。"
+        "霍格沃茨还在九月之后，阿不思·邓布利多仍是即将入学的少年，格林德沃也还没有来。"
+    ),
+    "historical_mood": (
+        "维多利亚晚期的魔法界仍被保密法裹住。才华、体面和家庭秘密比战争更近；"
+        "人们用隔绝来保护自己，也因此把孩子关在窗帘后面。"
+    ),
+    "world_condition": (
+        "阿芒多·迪佩特掌管霍格沃茨。邓布利多家刚把阿利安娜藏进山谷，珀西瓦尔已死在阿兹卡班。"
+        "1899年夏天的悲剧尚未发生，但气压会随着假期回家和毕业年逐渐变重。"
+    ),
+    "core_atmosphere": (
+        "煤油灯的油烟",
+        "旧羊皮纸和墨水",
+        "秋天壁炉里的烟",
+        "雨后的湿土",
+        "湿冷石阶上的烛油",
+        "山谷里被窗帘挡住的窗口",
+    ),
+    "era_background": DUMBLEDORE_ERA_BACKGROUND,
+    "mainline_summary": (
+        "1892年至1899年，玩家可以与年轻的邓布利多同窗七年，也可以完全过自己的学生生活。"
+        "戈德里克山谷的家庭秘密、1899年夏格林德沃的到来和阿利安娜的坠落只是可错过的历史气压。"
+    ),
+}
+
+
+DUMBLEDORE_AFTERMATH_TIMELINE = """1899年那个夏天之后，阿不思与盖勒特走上完全不同的路。以下内容是成年后时代的历史框架，用作远方压力、报纸标题、人物背景和多年后的回声，不是必须逐条演完的任务清单。
+
+正史层级必须分清：1899年阿利安娜死亡且施法者未知、格林德沃离开英国并崛起、1926年纽约事件、1927年巴黎集会、约1932年选举骗局与血盟破裂、1945年邓布利多击败格林德沃，是普通正史线的硬锚点。玩家可以改变这些事件周围的人物命运、抵抗过程、伤亡、关系和社会代价；如果玩家直接救下阿利安娜、让阿不思追随格林德沃、提前杀死格林德沃或改变1945年胜负，必须明确进入架空历史，并让此后的世界状态产生系统性变化。普通正史线中，玩家可以影响终局的条件与余波，但不应无条件取代邓布利多完成1945年的历史位置。
+
+1899年之后，阿不思留在英国并回到霍格沃茨任教，把才华收进课堂，把那年夏天锁进沉默。资料对他早期教授的科目存在冲突，通常只写"霍格沃茨教授"；确需展开时可以采用先教黑魔法防御术、后转任变形术的兼容解释，但不要虚构未经确认的转职年份。阿不福思逐渐承担自己的成年生活，兄弟关系可以缓慢修复，却始终保留阿利安娜之死留下的伤痕。
+
+约1900年至1925年是正史留白最大的原创区。格林德沃从魔杖制造师格里戈维奇手中夺走老魔杖，在欧洲聚拢追随者并建立纽蒙迦德，城门上刻着"为了更伟大的利益"。他的运动挪用死亡圣器的标志，主张终结《国际巫师保密法》、让巫师不再躲藏并由巫师领导麻瓜。他真正危险的地方是能抓住真实的制度不公、战争创伤和对躲藏的厌倦，再把它们导向统治、酷刑与牺牲。追随者可分为意识形态核心、权力投机者、制度受害者、末日恐惧者、被胁迫者和双面间谍；"圣徒"只是便于创作的中文称呼，不得擅自添加统一黑魔标记、固定军阶、纯血准入制或制式入会仪式。
+
+1914年至1918年的麻瓜第一次世界大战可以作为一代人的共同创伤和保密压力。不得把格林德沃写成直接策划麻瓜战争或操纵纳粹政权，这类内容必须明确标成架空创作。1939年至1945年的麻瓜第二次世界大战与全球巫师战争在时间上并行，也只能作为社会背景与救援压力。
+
+1926年，格林德沃在纽约冒充美国魔法国会高官珀西瓦尔·格雷夫斯，追查并利用默然者克雷登斯，最终被纽特·斯卡曼德等人揭破并短暂拘押。纽约篇可以使用MACUSA的严格保密、魔杖许可、巫师与麻瓜隔离、第二塞勒姆教会和默默然灾难，但不得把纽特、蒂娜、奎妮、雅各布提前放进1890年代的英国校园。
+
+1927年，格林德沃在押送途中脱身，在巴黎拉雪兹神父公墓地下集会公开宣讲。他用未来麻瓜战争的影像放大真实恐惧，并以蓝色魔火筛选愿意穿过火焰的追随者；这既是宣传，也是阵营分化与暴力威胁。莉塔死亡、奎妮与克雷登斯转向、血盟容器被嗅嗅偷走并交到邓布利多一方，可以作为背景事件，不是必须出现的镜头。克雷登斯被告知自己是"奥雷利乌斯·邓布利多"属于电影专属且争议很大的设定，可以不采用。
+
+约1932年，格林德沃在德国获得司法与政治上的放行，进入国际巫师联合会最高领袖选举。他杀死并操纵麒麟尸体伪造认可，骗局最终在不丹被揭穿，维森西娅·桑托斯当选。年份应写作"约1932年"或"1930年代初"。这一段的重点是政治绥靖、官僚渗透、司法失灵、证据与反情报，不要压缩成一场决斗。
+
+同一阶段，格林德沃试图杀死克雷登斯，阿不思与阿不福思出手保护，双方咒语相撞使血盟破裂。血盟只阻止阿不思与格林德沃直接彼此动手，不阻止他们培养代理人、传递情报、保护第三者或破坏对方计划；不得把它扩展成共享思想、远程定位、违约必死或普通解除咒即可拆除，也不得让它决定阿利安娜之死。血盟破裂后阿不思才真正可能与他为敌，但仍受负罪感、政治后果和对权力的不信任约束。
+
+约1933年至1944年，全球巫师战争持续扩大。纽蒙迦德同时是政治圣地、情报中枢和关押反对者的监狱。邓布利多一方不是一支服从命令的军队，而是由纽特、忒修斯、蒂娜、奎妮、雅各布、尤拉莉、邦蒂、尤素福、阿不福思和尼可·勒梅等人组成的信任网络：每个人都可能在某个问题上违背阿不思的预期，质疑他的隐瞒，或拒绝不透明的计划。这段时间的战役、抵抗组织、囚犯和地区政治可以自由创作，但不得当成官方年表宣称。
+
+1945年，阿不思与格林德沃完成那场被后世称为魔法史最伟大的决斗。地点、招式、见证人以及老魔杖具体如何转而效忠阿不思都属于安全留白；硬事实只是阿不思获胜、格林德沃被囚禁在他自己建造的纽蒙迦德。1956年阿不思成为霍格沃茨校长。更晚的年代里另一个追逐老魔杖的黑魔王会杀死格林德沃，那已远在玩家一生之外，只作为远方收束，不要写进剧情。
+
+死亡圣器、老魔杖、血盟、默然者、麒麟和蓝色魔火都必须按已知边界使用：佩戴或研究圣器标志不等于加入格林德沃；老魔杖易主不要求杀死前任，也不会在每次缴械时机械转移；默然者是创伤与压抑的结果，不是可升级的战斗职业；麒麟能感知内心却不是万能测谎仪；蓝色魔火的筛选效果只在巴黎集会那一场成立。年份是硬约束：只有当前日期真正到达对应年份，相应事件才可能成为现实，1900年的人不可能知道1932年的选举或1945年的结局，也不得提前说出这些名字与地点。玩家可以改变这条线上的任何一环，但每次改变都必须留下人物、关系、制度、资源或世界线代价。"""
+
+
+DUMBLEDORE_ARCS: tuple[dict[str, Any], ...] = (
+    {
+        "id": "godrics_hollow_summer",
+        "period": "1892年夏",
+        "start_date": "1892-07-01",
+        "end_date": "1892-08-31",
+        "title": "踏入山谷",
+        "summary": "煤油灯、泥路和一扇总是拉上的窗。邓布利多家保持礼貌距离，阿不思即将去霍格沃茨，兴奋里藏着不想被问起的事。",
+        "anchor_events": ("戈德里克山谷", "邓布利多家的距离", "入学前的夏天"),
+        "important_figures": ("阿不思·邓布利多", "肯德拉·邓布利多", "阿不福思·邓布利多", "巴希达·巴沙特"),
+        "active_pressures": ("山谷里的安静不像表面那么普通", "家庭秘密尚未向玩家打开", "九月入学仍在前方"),
+        "freedom_note": "玩家可以把这里当成路过的村子，也可以成为阿不思入学前的玩伴；不要第一回合就揭开阿利安娜的全部秘密。",
+    },
+    {
+        "id": "brilliant_classmate",
+        "period": "1892–1893学年",
+        "start_date": "1892-09-01",
+        "end_date": "1893-08-31",
+        "title": "天才同窗",
+        "summary": "迪佩特治下的旧式霍格沃茨里，阿不思迅速不再只是仇视麻瓜者的儿子。分院、第一年课程和图书馆成为日常，家庭裂痕只在家书和假期露出。",
+        "anchor_events": ("分院", "第一年课程", "阿不思的才华", "假期回山谷"),
+        "important_figures": ("阿不思·邓布利多", "埃尔菲亚斯·多吉", "阿芒多·迪佩特"),
+        "active_pressures": ("才华把目光吸走", "玩家仍可建立完全独立的朋友圈", "课程与学院生活优先"),
+        "freedom_note": "玩家可以与阿不思成为挚友、竞争者或毫无交集的人；格林德沃此时不得出现在校园。",
+    },
+    {
+        "id": "bent_by_family",
+        "period": "1893–1896年",
+        "start_date": "1893-09-01",
+        "end_date": "1896-08-31",
+        "title": "被家族压弯的脊背",
+        "summary": "荣誉在学校堆积，山谷里的窗户却更紧。阿不福思逐渐长大，阿利安娜的状态不稳定，阿不思不愿归家形成对照。",
+        "anchor_events": ("假期回家", "家庭气氛变紧", "阿不福思的怨言"),
+        "important_figures": ("阿不思·邓布利多", "阿不福思·邓布利多", "阿利安娜·邓布利多", "肯德拉·邓布利多"),
+        "active_pressures": ("是否看进那扇被窗帘挡住的窗", "学校荣誉与家庭责任冲突"),
+        "freedom_note": "只有玩家进入山谷、家庭或相关回忆时，才把家庭秘密变成当前焦点。不要提前放出格林德沃。",
+    },
+    {
+        "id": "light_before_graduation",
+        "period": "1896–1899学年",
+        "start_date": "1896-09-01",
+        "end_date": "1899-06-30",
+        "title": "毕业前的光",
+        "summary": "阿不思已成为学校传奇，开始更公开地谈论巫师应对世界承担的责任。肯德拉更疲惫，毕业与“以后去哪里”变成真问题。",
+        "anchor_events": ("N.E.W.T.", "改革理想", "毕业去向"),
+        "important_figures": ("阿不思·邓布利多", "阿不福思·邓布利多", "埃尔菲亚斯·多吉"),
+        "active_pressures": ("才华要拿去改变世界，还是先看护一个妹妹", "玩家自己的前程同样重要"),
+        "freedom_note": "玩家可以把阿不思拉回家庭，一起畅想改革，或只关心自己的考试与前程。",
+    },
+    {
+        "id": "greater_good_summer",
+        "period": "1899年夏",
+        "start_date": "1899-07-01",
+        "end_date": "1899-08-31",
+        "title": "更伟大的利益",
+        "summary": "肯德拉去世后，被德姆斯特朗开除的格林德沃借住到姑婆巴希达家。两个天才迅速相爱，讨论死亡圣器、用复活石召回死者、打破保密法和由巫师引领麻瓜，并以血立誓永不彼此为敌。阿不福思指出照护责任无法与远行计划共存，冲突随时可能爆发。",
+        "anchor_events": ("肯德拉之死", "格林德沃来访", "更伟大的利益", "血盟", "混战"),
+        "important_figures": ("阿不思·邓布利多", "盖勒特·格林德沃", "阿不福思·邓布利多", "阿利安娜·邓布利多", "巴希达·巴沙特"),
+        "active_pressures": ("两个天才的计划是否值得让一个女孩继续被藏起来", "玩家可以拉住、拆开、旁观或根本不在山谷"),
+        "freedom_note": "只有玩家身处山谷、与邓布利多家有联系或主动追寻阿不思去向时，这一阶段才应成为当前焦点；否则只是远方传闻。",
+    },
+    {
+        "id": "greater_good_aftermath",
+        "period": "1899年之后",
+        "start_date": "1899-09-01",
+        "end_date": "9999-12-31",
+        "title": "理想碎裂后的余波",
+        "summary": (
+            "无论阿利安娜是否死去、格林德沃是否逃离，活下来的人都带着伤、秘密和罪名。游戏继续，不结束。"
+            "此后数十年，阿不思留在霍格沃茨任教，格林德沃在欧洲聚起圣徒、走向纽蒙迦德，"
+            "两人被年少时的血盟锁住，直到1932年血盟破碎、1945年那场决斗才有结局。"
+        ),
+        "anchor_events": (
+            "余波",
+            "决裂或改道",
+            "毕业后的人生",
+            "圣徒与纽蒙迦德",
+            "1926年纽约",
+            "1927年巴黎集会",
+            "1932年选举与血盟破碎",
+            "1945年的决斗",
+        ),
+        "important_figures": (
+            "阿不思·邓布利多",
+            "阿不福思·邓布利多",
+            "盖勒特·格林德沃",
+            "格林德沃的圣徒",
+        ),
+        "active_pressures": (
+            "有些咒不是谁施放的，而是谁先伸出了手",
+            "改变历史必须留下裂痕",
+            "远方的欧洲正在慢慢变黑，英国却迟迟不肯承认",
+        ),
+        "future_timeline": DUMBLEDORE_AFTERMATH_TIMELINE,
+        "freedom_note": "玩家可以离开学校、留在山谷、追随或阻止格林德沃，或过自己的生活。不要把阿不思立刻写成后世那个温和校长，也不要把几十年后的结局提前搬到当前回合。",
+    },
+)
+
+
+DUMBLEDORE_NODES: tuple[dict[str, Any], ...] = (
+    {
+        "id": "godrics_hollow_arrival",
+        "arc_id": "godrics_hollow_summer",
+        "title": "1892年夏，踏入戈德里克山谷",
+        "start_date": "1892-07-01",
+        "end_date": "1892-08-31",
+        "importance": "major",
+        "pressure_summary": "山谷看起来安静，但邓布利多家的礼貌距离和一扇拉上的窗说明这里藏着不愿见人的事。",
+        "possible_player_roles": ("路过者", "玩伴", "打听者", "保持距离的人"),
+        "match_terms": ("山谷", "戈德里克", "窗帘", "煤油灯", "邓布利多", "godrics_hollow"),
+    },
+    {
+        "id": "dumbledore_first_year",
+        "arc_id": "brilliant_classmate",
+        "title": "与年轻邓布利多同窗",
+        "start_date": "1892-09-01",
+        "end_date": "1893-08-31",
+        "importance": "major",
+        "pressure_summary": "阿不思的才华把所有目光吸走；玩家要决定是否站在他旁边，或过自己的第一年。",
+        "possible_player_roles": ("挚友", "竞争者", "普通同学", "毫无交集的人"),
+        "match_terms": ("阿不思", "同窗", "分院", "图书馆", "才华", "霍格沃茨"),
+    },
+    {
+        "id": "hidden_sister",
+        "arc_id": "bent_by_family",
+        "title": "家庭秘密与阿利安娜",
+        "start_date": "1893-09-01",
+        "end_date": "1899-06-30",
+        "importance": "major",
+        "pressure_summary": "妹妹被藏在窗帘后面。靠近她需要信任、假期回访或闯入，而不是自动过场。",
+        "possible_player_roles": ("家庭一侧的人", "误入者", "保密者", "远离者"),
+        "match_terms": ("阿利安娜", "妹妹", "默然者", "窗帘", "山谷", "秘密"),
+    },
+    {
+        "id": "kendra_death",
+        "arc_id": "greater_good_summer",
+        "title": "1899年母亲之死",
+        "start_date": "1899-07-01",
+        "end_date": "1899-07-31",
+        "importance": "major",
+        "pressure_summary": "肯德拉死于照顾阿利安娜时的意外，阿不思被迫回家。不在山谷的玩家只应听到传闻。",
+        "possible_player_roles": ("吊唁者", "家庭支持者", "远方听闻者"),
+        "match_terms": ("肯德拉", "母亲", "去世", "意外", "回家"),
+    },
+    {
+        "id": "grindelwald_summer",
+        "arc_id": "greater_good_summer",
+        "title": "两个天才相遇",
+        "start_date": "1899-07-01",
+        "end_date": "1899-08-31",
+        "importance": "major",
+        "pressure_summary": "格林德沃借住巴沙特家，与阿不思讨论更伟大的利益并订立血盟。这是可错过、可拆开、可被改变的相遇。",
+        "possible_player_roles": ("挚友", "阻拦者", "同谋", "旁观者"),
+        "match_terms": ("格林德沃", "金发", "更伟大的利益", "巴沙特", "死亡圣器", "血盟", "复活石"),
+    },
+    {
+        "id": "ariana_fall",
+        "arc_id": "greater_good_summer",
+        "title": "混战与坠落",
+        "start_date": "1899-08-01",
+        "end_date": "1899-08-31",
+        "importance": "critical",
+        "pressure_summary": "格林德沃对阿不福思使用钻心咒后，三人混战可能夺走阿利安娜。致命咒语的施法者必须保持未知：可以给出彼此矛盾的记忆与证词，但不得判定凶手。玩家可以伸手、旁观、错过或改写，但不能无代价。",
+        "possible_player_roles": ("拉住坠落女孩的人", "目击者", "劝架者", "不在场的人"),
+        "match_terms": ("阿利安娜", "混战", "魔咒", "死亡", "坠落", "决斗", "钻心咒", "葬礼"),
+    },
+    {
+        "id": "greater_good_aftermath",
+        "arc_id": "greater_good_aftermath",
+        "title": "理想碎裂后的余波",
+        "start_date": "1899-09-01",
+        "end_date": "9999-12-31",
+        "importance": "major",
+        "pressure_summary": "格林德沃可能逃离，兄弟可能决裂，活下来的人仍带着伤。高世界线偏移也必须留下裂痕。",
+        "possible_player_roles": ("留下的人", "追随者", "阻止者", "过自己生活的人"),
+        "match_terms": ("余波", "逃离", "决裂", "霍格沃茨", "格林德沃"),
+    },
+)
+
+
+PARENT_FRAME: dict[str, Any] = {
+    "opening_date": "1971-09-01",
+    "opening_scene": (
+        "1971年9月1日，九又四分之三站台的蒸汽里漏进麻瓜收音机的摇滚乐。"
+        "詹姆、小天狼星、卢平、彼得、莉莉与斯内普将在这趟列车上第一次把敌意和友谊摆上桌。"
+    ),
+    "historical_mood": (
+        "战争尚未碾碎笑声。霍格沃茨走廊里仍是魁地奇、恶作剧和初恋，"
+        "校外却开始有人失踪，有人低声避开一个不该直呼的名字。"
+    ),
+    "world_condition": (
+        "邓布利多已是校长，麦格是变形术教授，斯拉格霍恩执掌魔药课。"
+        "打人柳新种下，尖叫棚屋尚未成为完整鬼屋，活点地图还是空白羊皮纸。"
+        "第一次巫师战争的硝烟在远处升起，但一年级的日常仍是课堂和宿舍。"
+    ),
+    "core_atmosphere": (
+        "魁地奇球场的青草",
+        "飞天扫帚的抛光油",
+        "禁林的松脂",
+        "宿舍里的收音机杂音",
+        "满月前走廊里突然空掉的位置",
+        "远处隐隐逼近的硝烟",
+    ),
+    "era_background": PARENT_ERA_BACKGROUND,
+    "mainline_summary": (
+        "1971年至1978年是校园阶段，玩家与掠夺者一代同窗；1978年毕业后自动进入成年过渡与战争时代，"
+        "并可继续推进到1981年及其后的开放式余波。恶作剧、满月、那句泥巴种和战争都是可错过的气压；"
+        "玩家可以并肩、劝阻、告发、参战、远离，或把七年过成普通学生生活。"
+    ),
+    "school_period": {
+        "start_date": "1971-09-01",
+        "end_date": "1978-06-30",
+        "description": "角色作为霍格沃茨学生度过七年，课程、考试、学院生活和学生关系在此阶段生效。",
+    },
+    "adult_period": {
+        "start_date": "1978-07-01",
+        "end_date": "9999-12-31",
+        "description": "毕业后进入成年过渡、第一次巫师战争与1981年后的开放式人生，不再默认是学生。",
+    },
+}
+
+
+PARENT_ADULT_TIMELINE = """亲世代成年与战争时代从1978年7月1日开始。1971年至1978年6月30日是七年校园阶段；
+从1978年夏起，玩家和同期核心角色应按成年巫师、求职者、家属、独立行动者或组织外围人物处理，不能继续默认住在学生宿舍、参加普通课程或以学生身份行动。
+
+1978年至1981年，第一次巫师战争逐渐从远方失踪与低声传闻进入魔法界公共生活。凤凰社和食死徒都是秘密组织，
+玩家是否加入、调查、对抗、协助或远离，必须由实际行动、关系和证据决定。成年不自动等于凤凰社成员，也不自动等于食死徒。
+普通学生和没有组织联系的成年巫师不应直接知道预言全文、秘密据点、行动名单或组织内部计划。
+
+1981年10月31日是高压历史节点，不是游戏终点。波特夫妇的命运、小天狼星是否蒙冤、彼得是否伪造死亡以及战争后的社会状态，
+都应承接玩家已经成立的行动与世界线变化。1981年之后允许继续推进；不得因为原著时间线结束而停止叙事、强制恢复原结局或召回子世代主线。
+"""
+
+
+PARENT_ARCS: tuple[dict[str, Any], ...] = (
+    {
+        "id": "platform_1971",
+        "period": "1971年9月",
+        "start_date": "1971-09-01",
+        "end_date": "1971-09-30",
+        "title": "站台与分院",
+        "summary": "蒸汽、猫头鹰和流行乐。列车上詹姆与小天狼星已经开始发光，斯内普与莉莉坐在另一处。分院帽将把四名未来的掠夺者送进格兰芬多，把斯内普送进斯莱特林。",
+        "anchor_events": ("九又四分之三站台", "列车冲突", "分院"),
+        "important_figures": ("詹姆·波特", "小天狼星·布莱克", "莉莉·伊万斯", "西弗勒斯·斯内普", "莱姆斯·卢平", "彼得·佩迪鲁"),
+        "active_pressures": ("你要坐进哪一节车厢", "学院将立刻切开旧友谊与新敌意"),
+        "freedom_note": "玩家可以加入任何一群人，也可以谁都不加入。不要把哈利写成这趟列车上的学生。",
+    },
+    {
+        "id": "marauders_forming",
+        "period": "1971–1973年",
+        "start_date": "1971-10-01",
+        "end_date": "1973-08-31",
+        "title": "笑声开始成形",
+        "summary": "四人组逐渐粘在一起，斯内普与莉莉仍跨学院来往。卢平在满月前后消失，打人柳对低年级是禁止靠近的新危险。",
+        "anchor_events": ("宿舍友谊", "跨学院往来", "满月缺席", "打人柳"),
+        "important_figures": ("詹姆·波特", "小天狼星·布莱克", "莱姆斯·卢平", "彼得·佩迪鲁", "莉莉·伊万斯", "西弗勒斯·斯内普"),
+        "active_pressures": ("恶作剧是友谊还是把人关在门外的方式", "课程与校园生活优先"),
+        "freedom_note": "玩家可以成为第五人、旁观者或完全独立的学生。狼人身份不得开局公开。",
+    },
+    {
+        "id": "moon_and_secret",
+        "period": "1973–1975年",
+        "start_date": "1973-09-01",
+        "end_date": "1975-08-31",
+        "title": "月亮与秘密",
+        "summary": "有人可能发现卢平是狼人。詹姆、小天狼星和彼得开始危险的阿尼马格斯之路，活点地图还是未完成的玩笑，尖叫棚屋的叫声开始变成村庄传说。",
+        "anchor_events": ("满月", "打人柳", "尖叫棚屋", "阿尼马格斯"),
+        "important_figures": ("莱姆斯·卢平", "詹姆·波特", "小天狼星·布莱克", "彼得·佩迪鲁"),
+        "active_pressures": ("发现朋友每月消失一次之后，会告发、帮忙还是利用", "活点地图不是必得物品"),
+        "freedom_note": "玩家可以伸出援手、向教师告发或什么都不做。不要把每一次满月都写成强制副本。",
+    },
+    {
+        "id": "mudblood_year",
+        "period": "1975–1976学年",
+        "start_date": "1975-09-01",
+        "end_date": "1976-08-31",
+        "title": "那句泥巴种",
+        "summary": "O.W.L.年，詹姆的霸凌公开化。莉莉护住斯内普，却被那句咒骂推开。裂痕可以发生、被阻止、被火上浇油，或只成为不在场者后来听到的传闻。",
+        "anchor_events": ("公开羞辱", "泥巴种", "友谊破裂", "O.W.L."),
+        "important_figures": ("西弗勒斯·斯内普", "莉莉·伊万斯", "詹姆·波特", "小天狼星·布莱克"),
+        "active_pressures": ("一句咒骂能否被收回", "玩家可以站在中间、只保护一人或当天不在场"),
+        "freedom_note": "不在场时，这只应成为后来的校园传闻，而不是强制过场。",
+    },
+    {
+        "id": "paths_diverge",
+        "period": "1976–1978年",
+        "start_date": "1976-09-01",
+        "end_date": "1978-06-30",
+        "title": "毕业前的分流",
+        "summary": "莉莉与詹姆可能靠近，斯内普更深地走向斯莱特林中的黑暗圈子，校外失踪消息变多。N.E.W.T.与前途把人推向不同的成年人。",
+        "anchor_events": ("N.E.W.T.", "感情变化", "黑暗圈子", "毕业"),
+        "important_figures": ("莉莉·伊万斯", "詹姆·波特", "西弗勒斯·斯内普", "小天狼星·布莱克"),
+        "active_pressures": ("你们会变成什么样的成年人", "战争仍是校外新闻，除非玩家主动靠近"),
+        "freedom_note": "玩家不必提前加入凤凰社或食死徒。普通校园生活仍然合法。",
+    },
+    {
+        "id": "first_war",
+        "period": "1978–1981年",
+        "start_date": "1978-07-01",
+        "end_date": "1981-10-30",
+        "title": "硝烟不再远处",
+        "summary": "毕业后，掠夺者与莉莉可能走向凤凰社，斯内普可能走向另一条路。预言只应作为远处回声，不要让普通学生开局就知道全文。",
+        "anchor_events": ("凤凰社", "食死徒", "失踪与袭击", "隐居"),
+        "important_figures": ("詹姆·波特", "莉莉·伊万斯", "小天狼星·布莱克", "西弗勒斯·斯内普", "阿不思·邓布利多"),
+        "active_pressures": ("要不要发出警告", "要不要参战", "要不要远离"),
+        "freedom_note": "只有毕业后仍留在公共生活、或主动接近相关人物的玩家，才应把战争变成当前焦点。",
+    },
+    {
+        "id": "halloween_1981",
+        "period": "1981年10月31日及之后",
+        "start_date": "1981-10-31",
+        "end_date": "9999-12-31",
+        "title": "命运之夜与余波",
+        "summary": "高锥村可能发生悲剧，小天狼星可能蒙冤，彼得可能伪造死亡。改变这一夜是最高世界线偏移，必须改写此后的魔法界，但不能把子世代人物提前召唤出来。",
+        "anchor_events": ("万圣节", "波特夫妇", "小天狼星", "余波"),
+        "important_figures": ("詹姆·波特", "莉莉·伊万斯", "小天狼星·布莱克", "彼得·佩迪鲁", "西弗勒斯·斯内普"),
+        "active_pressures": ("你要不要在命运之夜前发出最后一声警告", "游戏不因这一夜结束"),
+        "freedom_note": "玩家可以警告、对抗、站在另一侧，或只在报纸上读到讣告。不在场就不要写成目击。",
+    },
+)
+
+
+PARENT_NODES: tuple[dict[str, Any], ...] = (
+    {
+        "id": "platform_1971",
+        "arc_id": "platform_1971",
+        "title": "1971年的站台与列车",
+        "start_date": "1971-09-01",
+        "end_date": "1971-09-30",
+        "importance": "major",
+        "pressure_summary": "你要坐进哪一节车厢，将决定先看见掠夺者的光还是斯内普与莉莉的旧友谊。",
+        "possible_player_roles": ("同车人", "旁观者", "劝架者", "独行者"),
+        "match_terms": ("站台", "列车", "分院", "詹姆", "莉莉", "斯内普", "platform_nine_three_quarters"),
+    },
+    {
+        "id": "marauders_forming",
+        "arc_id": "marauders_forming",
+        "title": "掠夺者成形",
+        "start_date": "1971-10-01",
+        "end_date": "1973-08-31",
+        "importance": "major",
+        "pressure_summary": "四人组的笑声开始填满走廊。玩家可以加入、厌恶或无视。",
+        "possible_player_roles": ("第五人", "竞争者", "告状者", "局外人"),
+        "match_terms": ("掠夺者", "恶作剧", "詹姆", "小天狼星", "宿舍"),
+    },
+    {
+        "id": "moon_and_willow",
+        "arc_id": "moon_and_secret",
+        "title": "满月、打人柳与尖叫棚屋",
+        "start_date": "1973-09-01",
+        "end_date": "1975-08-31",
+        "importance": "major",
+        "pressure_summary": "卢平每月消失。打人柳和尖叫棚屋是学校为他准备的秘密，不是一年级观光点。",
+        "possible_player_roles": ("援手", "告发者", "误入者", "保密者"),
+        "match_terms": ("满月", "狼人", "打人柳", "尖叫棚屋", "卢平"),
+    },
+    {
+        "id": "animagus_and_map",
+        "arc_id": "moon_and_secret",
+        "title": "阿尼马格斯与活点地图",
+        "start_date": "1974-09-01",
+        "end_date": "1976-06-30",
+        "importance": "major",
+        "pressure_summary": "空白羊皮纸正在被画成活点地图。这是可被发现、没收、复制或错过的秘密，不是新系统。",
+        "possible_player_roles": ("共犯", "发现者", "告发者", "毫不知情的人"),
+        "match_terms": ("阿尼马格斯", "活点地图", "牡鹿", "黑狗", "老鼠", "羊皮纸"),
+    },
+    {
+        "id": "snape_worst_memory",
+        "arc_id": "mudblood_year",
+        "title": "公开羞辱与那句泥巴种",
+        "start_date": "1975-09-01",
+        "end_date": "1976-08-31",
+        "importance": "critical",
+        "pressure_summary": "詹姆当众羞辱斯内普，莉莉护住他后被骂泥巴种。不在场的玩家不应被传送到现场。",
+        "possible_player_roles": ("劝架者", "火上浇油的人", "只保护一人的人", "不在场的人"),
+        "match_terms": ("泥巴种", "羞辱", "倒吊", "斯内普", "莉莉", "最糟"),
+    },
+    {
+        "id": "paths_diverge",
+        "arc_id": "paths_diverge",
+        "title": "毕业分流",
+        "start_date": "1976-09-01",
+        "end_date": "1978-06-30",
+        "importance": "major",
+        "pressure_summary": "感情、黑暗圈子和前途把同窗推向不同的成年人。",
+        "possible_player_roles": ("朋友", "中间人", "旁观者"),
+        "match_terms": ("毕业", "N.E.W.T.", "凤凰社", "食死徒", "前途"),
+    },
+    {
+        "id": "first_war",
+        "arc_id": "first_war",
+        "title": "第一次巫师战争",
+        "start_date": "1978-07-01",
+        "end_date": "1981-10-30",
+        "importance": "major",
+        "pressure_summary": "校外袭击变多。战争是可加入、可远离的社会背景，不是必须参战的副本。",
+        "possible_player_roles": ("凤凰社成员", "警告者", "远离者", "另一侧的人"),
+        "match_terms": ("战争", "凤凰社", "食死徒", "伏地魔", "失踪"),
+    },
+    {
+        "id": "halloween_1981",
+        "arc_id": "halloween_1981",
+        "title": "1981年万圣节",
+        "start_date": "1981-10-31",
+        "end_date": "1981-10-31",
+        "importance": "critical",
+        "pressure_summary": "命运之夜可以被警告、被改变或被错过。改变它必须改写世界，但不能提前召唤子世代人物。",
+        "possible_player_roles": ("警告者", "保护者", "对抗者", "只读讣告的人"),
+        "match_terms": ("万圣节", "高锥村", "波特夫妇", "1981", "婴儿"),
+    },
+)
+
+
 def get_generation_content(era_id: str) -> dict[str, Any]:
     """返回不会随玩家状态变化的时代内容，供动态上下文计算使用。"""
     era = get_era(era_id)
@@ -351,6 +842,33 @@ def get_generation_content(era_id: str) -> dict[str, Any]:
                 "现代线使用时间扰动表达时间因果压力；普通校园生活、对话、课程和关系变化不自动改变时间。",
                 "原著因果只作为背景引导，玩家的实际行动和已经成立的状态优先。",
             ],
+        }
+    if era["id"] == "dumbledore_era":
+        return {
+            "era_frame": _copy_frame(DUMBLEDORE_FRAME),
+            "mainline_arcs": [_copy_mapping(arc) for arc in DUMBLEDORE_ARCS],
+            "mainline_nodes": [_copy_mapping(node) for node in DUMBLEDORE_NODES],
+            "cast_index": dumbledore_cast_index(),
+            "forbidden_figures": list(DUMBLEDORE_FORBIDDEN_FIGURES),
+            "available_figures": [
+                _copy_mapping(item) for item in DUMBLEDORE_AVAILABLE_FIGURES
+            ],
+            "era_background": DUMBLEDORE_ERA_BACKGROUND,
+            "freedom_rules": list(FREEDOM_RULES) + list(HISTORICAL_FREEDOM_RULES),
+        }
+    if era["id"] == "parent_generation":
+        return {
+            "era_frame": _copy_frame(PARENT_FRAME),
+            "mainline_arcs": [_copy_mapping(arc) for arc in PARENT_ARCS],
+            "mainline_nodes": [_copy_mapping(node) for node in PARENT_NODES],
+            "cast_index": parent_cast_index(),
+            "forbidden_figures": list(PARENT_FORBIDDEN_FIGURES),
+            "available_figures": [
+                _copy_mapping(item) for item in PARENT_AVAILABLE_FIGURES
+            ],
+            "adult_timeline": PARENT_ADULT_TIMELINE,
+            "era_background": PARENT_ERA_BACKGROUND,
+            "freedom_rules": list(FREEDOM_RULES) + list(HISTORICAL_FREEDOM_RULES),
         }
     return {
         "era_frame": {
@@ -391,6 +909,7 @@ def build_generation_context(
     content = get_generation_content(era_id)
     era = get_era(era_id)
     state = player_state if isinstance(player_state, dict) else {}
+    memory_items = list(memories)
     school = state.get("school", {})
     school = school if isinstance(school, dict) else {}
     current_context = state.get("current_context", {})
@@ -422,7 +941,7 @@ def build_generation_context(
         statuses,
         action=action or {},
         location_id=current_context.get("location_id"),
-        memories=memories,
+        memories=memory_items,
     )
     pressure = _build_worldline_pressure(
         nodes=content["mainline_nodes"],
@@ -441,6 +960,25 @@ def build_generation_context(
             worldline=worldline,
             relevant_nodes=relevant_nodes,
         )
+    cast_index = content.get("cast_index", [])
+    if era["id"] == "parent_generation":
+        cast_index = parent_cast_index(
+            current_date,
+            revealed_facts=memory_items,
+        )
+
+    mainline_phase = {
+        "id": arc["id"],
+        "title": arc["title"],
+        "period": arc["period"],
+        "summary": arc["summary"],
+        "anchor_events": list(arc["anchor_events"]),
+        "important_figures": list(arc["important_figures"]),
+        "active_pressures": list(arc["active_pressures"]),
+        "freedom_note": arc["freedom_note"],
+    }
+    if arc.get("future_timeline"):
+        mainline_phase["future_timeline"] = arc["future_timeline"]
 
     return {
         "id": era["id"],
@@ -448,21 +986,18 @@ def build_generation_context(
         "years": era["years"],
         "era_frame": _copy_frame(content["era_frame"]),
         "generation_mainline": era["mainline"],
-        "mainline_phase": {
-            "id": arc["id"],
-            "title": arc["title"],
-            "period": arc["period"],
-            "summary": arc["summary"],
-            "anchor_events": list(arc["anchor_events"]),
-            "important_figures": list(arc["important_figures"]),
-            "active_pressures": list(arc["active_pressures"]),
-            "freedom_note": arc["freedom_note"],
-        },
+        "mainline_phase": mainline_phase,
         "timeline_phase": timeline_phase,
         "relevant_nodes": relevant_nodes,
         "freedom_rules": list(content["freedom_rules"]),
         "worldline_pressure": pressure,
-        "cast_index": content.get("cast_index", []),
+        "cast_index": cast_index,
+        "forbidden_figures": list(content.get("forbidden_figures", [])),
+        "available_figures": [
+            _copy_mapping(item) for item in content.get("available_figures", [])
+        ],
+        "adult_timeline": content.get("adult_timeline"),
+        "era_background": content.get("era_background"),
         "modern_arc": state.get("modern_arc", {}) if era["id"] == "modern" else None,
     }
 

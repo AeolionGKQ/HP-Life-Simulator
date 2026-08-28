@@ -71,3 +71,4 @@ def get_memories_by_ids(
     )
     order = {memory_id: index for index, memory_id in enumerate(memory_ids)}
     return sorted(memories, key=lambda item: order.get(item.memory_id, 999))
+

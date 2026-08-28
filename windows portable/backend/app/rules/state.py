@@ -133,6 +133,7 @@ def apply_turn_rules(
         current_date,
         changes,
         courses_enabled=courses_enabled,
+        era_id=era_id,
     )
 
     _apply_resource_caps(next_state, proposals.get("resource_cap_deltas"), changes)
@@ -324,6 +325,7 @@ def _apply_grade_transition(
     changes: dict[str, Any],
     *,
     courses_enabled: bool = True,
+    era_id: str | None = None,
 ) -> None:
     school = state.setdefault("school", {})
     current_grade = normalize_grade(school)
@@ -334,6 +336,15 @@ def _apply_grade_transition(
         _clear_current_courses(school, changes)
     else:
         school.setdefault("enrollment_started", False)
+
+    if (
+        era_id == "parent_generation"
+        and current_grade == "year_7"
+        and current_date >= date(1978, 7, 1)
+        and school.get("departure_reason") is None
+    ):
+        _auto_graduate_parent_generation(school, current_date, changes)
+        return
 
     requested_grade = response.turn.grade
     transition = response.turn.school_transition
@@ -432,6 +443,31 @@ def _apply_grade_transition(
         "after": requested_grade,
         "type": transition.type,
         "reason": transition.reason,
+    }
+
+
+def _auto_graduate_parent_generation(
+    school: dict[str, Any],
+    current_date: date,
+    changes: dict[str, Any],
+) -> None:
+    """亲世代跨过1978年毕业边界后，程序自动收束学生身份。"""
+    school["grade"] = "left_school"
+    school["departure_reason"] = "graduated_after_newts"
+    school["enrollment_started"] = True
+    school["sorting_completed"] = True
+    school["school_year"] = "1977-1978"
+    school["last_course_progression_year"] = 1978
+    _clear_current_courses(school, changes)
+    changes["school_grade"] = {
+        "before": "year_7",
+        "after": "left_school",
+        "type": "departure",
+        "reason": "graduated_after_newts",
+        "evidence": (
+            "亲世代角色已完成1971至1978年的七年在校阶段，"
+            f"并于{current_date.isoformat()}进入成年过渡。"
+        ),
     }
 
 

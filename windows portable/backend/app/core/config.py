@@ -161,3 +161,4 @@ def get_settings() -> Settings:
         project_root=project_root,
         config_path=config_path,
     )
+

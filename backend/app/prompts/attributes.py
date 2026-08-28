@@ -56,6 +56,16 @@ def build_attribute_initialization_messages(
     era = get_era(game_session.era_id)
     state = player_state.state
     setup = state.get("setup", {})
+    endgame_entry = state.get("endgame_entry") or {}
+    life_stage = "adult_graduate" if endgame_entry else "student"
+    patronus_learned = game_session.era_id == "modern" or bool(endgame_entry)
+    patronus_instruction = (
+        "当前开局已视为学会【呼神护卫】，选择的守护神形态可以作为已掌握技能的召唤形态；"
+        "这不代表施放必然成功，也不额外给予属性奖励。"
+        if patronus_learned
+        else
+        "守护神只是角色未来可能显现的形态，不能据此认定角色已经学会【呼神护卫】，也不能直接给予数值奖励。"
+    )
     context = {
         "protocol": {"name": "hp_simulator_attribute_initialization", "version": "1.2"},
         "generation": {
@@ -79,6 +89,8 @@ def build_attribute_initialization_messages(
             "school": state.get("school", {}),
             "starting_context": state.get("current_context", {}),
             "setup_answers": setup.get("answers", {}),
+            "life_stage": life_stage,
+            "endgame_entry": endgame_entry,
         },
         "catalog": catalog_for_prompt(),
         "adjustment_instruction": adjustment_instruction.strip(),
@@ -88,7 +100,12 @@ def build_attribute_initialization_messages(
         "当前任务只有一个：根据角色创建设定生成角色初始资源和五项长期维度。"
         "四个世代使用完全相同的属性规则，世代只影响时代背景和剧情主线。"
         "不要生成任何剧情，不要生成选项，不要修改关系、世界线、技能、词条或物品。"
-        "守护神只是角色未来可能显现的形态，不能据此认定角色已经学会【呼神护卫】，也不能直接给予数值奖励。"
+        f"{patronus_instruction}"
+        "character_setup.life_stage 说明角色当前的人生阶段："
+        "student 表示刚入学或在校的少年，按同龄学生水准生成；"
+        "adult_graduate 表示角色已经完成霍格沃茨七年教育、通过 N.E.W.T. 毕业并成年，"
+        "必须按成长后的成年巫师水准生成——体质、意志、魅力和魔力都应明显高于十一岁新生，"
+        "但仍要克制，不能给出接近上限或超越同代顶尖巫师的数值。"
         "所有属性必须覆盖完整目录，数值要克制、合理，并且理由必须能从角色设定中找到依据。"
         "如果 adjustment_instruction 非空，它是玩家对初始属性方向的偏好；"
         "应在不违反属性目录、数值上限和角色设定的前提下尽量遵守，不能把它当作直接修改数值的命令。"

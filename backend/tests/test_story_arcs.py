@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -12,10 +14,12 @@ from backend.app.models import (
 )
 from backend.app.services.story_arcs import (
     build_story_arc_context,
+    compress_story_arcs,
     ensure_story_arc_job,
     is_story_arc_blocking,
     story_arc_mode,
 )
+from backend.app.schemas.game import StoryArcResponse
 import backend.app.services.story_arcs as story_arc_service
 
 
@@ -60,7 +64,10 @@ def _add_turns(db: Session, session_id: str, start: int, end: int) -> None:
             )
 
 
-@pytest.mark.parametrize("era_id", ["second_generation", "modern"])
+@pytest.mark.parametrize(
+    "era_id",
+    ["dumbledore_era", "parent_generation", "second_generation", "modern"],
+)
 def test_story_arc_freezes_first_25_nodes_and_keeps_new_fallback_nodes(
     era_id: str,
 ) -> None:
@@ -178,3 +185,132 @@ def test_queue_mode_blocks_gameplay_while_job_is_pending(monkeypatch) -> None:
     )
     db.commit()
     assert is_story_arc_blocking(db, session.id)
+
+
+def test_manual_compression_merges_arcs_and_preserves_covered_turn_range(monkeypatch) -> None:
+    db = _database()
+    session = GameSession(name="测试", era_id="second_generation", state_version=75)
+    db.add(session)
+    db.flush()
+    _add_turns(db, session.id, 1, 75)
+    turns = list(
+        db.query(TurnRecord)
+        .filter(TurnRecord.session_id == session.id)
+        .order_by(TurnRecord.sequence.asc())
+    )
+    for index, (start, end) in enumerate(((1, 25), (26, 50), (51, 75))):
+        source_ids = [turn.id for turn in turns[start - 1:end]]
+        db.add(
+            StoryArcGenerationJob(
+                session_id=session.id,
+                status="ready",
+                request_id=f"ready-{index}",
+                source_turn_start=start,
+                source_turn_end=end,
+                source_turn_ids=source_ids,
+                source_state_version=75,
+                attempt=1,
+                completed_at=session.created_at,
+            )
+        )
+        db.add(
+            StoryArc(
+                session_id=session.id,
+                scope_key=f"arc-{start:04d}-{end:04d}",
+                status="ready",
+                title=f"阶段 {index + 1}",
+                summary=f"阶段 {index + 1} 的摘要",
+                open_threads=["调查已解决的旧线索", "继续追查黑巫师", "继续追查黑巫师"],
+                source_turn_ids=source_ids,
+                covered_turn_start=start,
+                covered_turn_end=end,
+            )
+        )
+    db.commit()
+
+    async def fake_request(_provider, _messages):
+        return StoryArcResponse(
+            response_type="story_arc",
+            title="压缩后的完整故事",
+            summary="保留三段剧情的关键因果和后续影响。",
+            causal_chain=["关键因果"],
+            open_threads=["继续追查黑巫师", "已完成的旧事项"],
+            key_characters=["player"],
+            key_locations=["home"],
+            keywords=["主线"],
+            important_turns=[5, 50, 75],
+        )
+
+    monkeypatch.setattr(story_arc_service, "_request_story_arc", fake_request)
+    merged = asyncio.run(compress_story_arcs(db, session.id))
+
+    assert merged.covered_turn_start == 1
+    assert merged.covered_turn_end == 75
+    assert merged.source_turn_ids == [turn.id for turn in turns]
+    assert merged.open_threads == ["继续追查黑巫师"]
+    assert db.query(StoryArc).filter(StoryArc.status == "merged").count() == 3
+    visible = story_arc_service.list_story_arc_reads(db, session.id)
+    assert len(visible) == 1
+    assert visible[0]["scope_key"] == "arc-compressed-0001-0075"
+    _add_turns(db, session.id, 76, 100)
+    turns = list(
+        db.query(TurnRecord)
+        .filter(TurnRecord.session_id == session.id)
+        .order_by(TurnRecord.sequence.asc())
+    )
+    db.add(
+        StoryArcGenerationJob(
+            session_id=session.id,
+            status="ready",
+            request_id="ready-76-100",
+            source_turn_start=76,
+            source_turn_end=100,
+            source_turn_ids=[turn.id for turn in turns[75:]],
+            source_state_version=100,
+            attempt=1,
+            completed_at=session.created_at,
+        )
+    )
+    db.add(
+        StoryArc(
+            session_id=session.id,
+            scope_key="arc-0076-0100",
+            status="ready",
+            title="第四阶段",
+            summary="第四阶段的摘要",
+            open_threads=["调查新线索"],
+            source_turn_ids=[turn.id for turn in turns[75:]],
+            covered_turn_start=76,
+            covered_turn_end=100,
+        )
+    )
+    db.commit()
+
+    merged_again = asyncio.run(compress_story_arcs(db, session.id))
+    assert merged_again.covered_turn_start == 1
+    assert merged_again.covered_turn_end == 100
+    assert merged_again.source_turn_ids == [turn.id for turn in turns]
+    visible = story_arc_service.list_story_arc_reads(db, session.id)
+    assert len(visible) == 1
+    assert visible[0]["scope_key"] == "arc-compressed-0001-0100"
+
+
+def test_manual_compression_rejects_fewer_than_two_arcs() -> None:
+    db = _database()
+    session = GameSession(name="测试", era_id="second_generation", state_version=25)
+    db.add(session)
+    db.flush()
+    db.add(
+        StoryArc(
+            session_id=session.id,
+            scope_key="arc-0001-0025",
+            title="唯一阶段",
+            summary="唯一阶段摘要",
+            covered_turn_start=1,
+            covered_turn_end=25,
+        )
+    )
+    db.commit()
+
+    with pytest.raises(ValueError, match="至少需要两条"):
+        asyncio.run(compress_story_arcs(db, session.id))

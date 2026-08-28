@@ -582,3 +582,4 @@ def list_turns(db: Session, session_id: str) -> list[TurnRecord]:
             .order_by(TurnRecord.sequence.asc())
         )
     )
+

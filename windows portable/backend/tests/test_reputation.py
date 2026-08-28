@@ -61,7 +61,10 @@ def test_reputation_normalization_does_not_turn_legacy_breakdowns_into_morality(
     assert normalized["legacy_breakdown"] == {"ravenclaw": 8, "academic": 3}
 
 
-@pytest.mark.parametrize("era_id", ["second_generation", "modern"])
+@pytest.mark.parametrize(
+    "era_id",
+    ["dumbledore_era", "parent_generation", "second_generation", "modern"],
+)
 def test_reputation_applies_delta_and_recomputes_level(era_id: str) -> None:
     state = {
         "reputation": {"score": 24},

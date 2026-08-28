@@ -82,6 +82,8 @@ export function GameView({
   const [storyArcs, setStoryArcs] = useState<StoryArc[]>([]);
   const [storyArcStatus, setStoryArcStatus] = useState<StoryArcStatus | null>(null);
   const [retryingStoryArc, setRetryingStoryArc] = useState(false);
+  const [compressingStoryArcs, setCompressingStoryArcs] = useState(false);
+  const [storyArcCompressError, setStoryArcCompressError] = useState("");
   const refreshRequestRef = useRef(0);
 
   async function refreshState() {
@@ -325,6 +327,19 @@ export function GameView({
     }
   }
 
+  async function compressAllStoryArcs() {
+    setCompressingStoryArcs(true);
+    setStoryArcCompressError("");
+    try {
+      await api.compressStoryArcs(sessionId);
+      setStoryArcs(await api.storyArcs(sessionId));
+    } catch (reason) {
+      setStoryArcCompressError(reason instanceof Error ? reason.message : "故事弧压缩失败");
+    } finally {
+      setCompressingStoryArcs(false);
+    }
+  }
+
   const player = state ?? {};
   const identity = player.identity ?? {};
   const context = player.current_context ?? {};
@@ -481,7 +496,12 @@ export function GameView({
           </>
         )}
         {activeMenu === "记忆管理" && (
-          <StoryArcPanel arcs={storyArcs} />
+          <StoryArcPanel
+            arcs={storyArcs}
+            compressing={compressingStoryArcs}
+            compressError={storyArcCompressError}
+            onCompress={() => void compressAllStoryArcs()}
+          />
         )}
         {activeMenu === "纪事" && (
           <div className="journal-list">
@@ -1142,13 +1162,38 @@ function StoryArcNotice({
   );
 }
 
-function StoryArcPanel({ arcs }: { arcs: StoryArc[] }) {
+function StoryArcPanel({
+  arcs,
+  compressing,
+  compressError,
+  onCompress,
+}: {
+  arcs: StoryArc[];
+  compressing: boolean;
+  compressError: string;
+  onCompress: () => void;
+}) {
   return (
     <div className="story-arc-panel">
       <section className="data-section">
         <p className="eyebrow">长期剧情记忆</p>
         <h2>故事弧</h2>
         <p className="muted">原始剧情节点不会被删除；故事弧只负责让后续叙事用更少的上下文记住较远的经历。</p>
+        <div className="story-arc-actions">
+          <button
+            className="secondary-button"
+            disabled={compressing || arcs.length < 2}
+            onClick={onCompress}
+          >
+            {compressing ? "正在压缩…" : "压缩全部故事弧"}
+          </button>
+          <span className="muted">
+            {arcs.length < 2
+              ? "至少需要两条故事弧才能压缩。"
+              : "把现有故事弧精简合并成一条，继承覆盖轮次并清理过期线索。"}
+          </span>
+        </div>
+        {compressError && <div className="error-banner">{compressError}</div>}
       </section>
       {arcs.length === 0 ? (
         <div className="data-section"><EmptyText text="完成足够的剧情节点后，阶段性故事弧会自动出现在这里。" /></div>

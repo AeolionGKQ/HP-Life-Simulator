@@ -47,6 +47,7 @@ STORY_ARC_PROTOCOL = """输出必须严格遵守以下 JSON 协议：
 
 
 _running_tasks: set[asyncio.Task[None]] = set()
+_compressing_sessions: set[str] = set()
 
 
 def utc_now() -> datetime:
@@ -419,6 +420,94 @@ def build_story_arc_messages(
     ]
 
 
+def _compact_text_list(
+    values: list[Any] | None,
+    *,
+    limit: int,
+    discard_obsolete: bool = False,
+) -> list[str]:
+    obsolete_markers = (
+        "已解决",
+        "已完成",
+        "不再需要",
+        "已经结束",
+        "过期",
+        "失效",
+        "放弃",
+        "取消",
+    )
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values or []:
+        text = str(value).strip()
+        if not text:
+            continue
+        if discard_obsolete and any(marker in text for marker in obsolete_markers):
+            continue
+        key = text.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(text[:500])
+        if len(result) >= limit:
+            break
+    return result
+
+
+def build_story_arc_compression_messages(
+    arcs: list[StoryArc],
+    *,
+    source_start: int,
+    source_end: int,
+) -> list[dict[str, str]]:
+    compact_arcs = [
+        {
+            "covered_turn_start": arc.covered_turn_start,
+            "covered_turn_end": arc.covered_turn_end,
+            "title": str(arc.title or "")[:300],
+            "summary": str(arc.summary or "")[:1800],
+            "causal_chain": _compact_text_list(arc.causal_chain, limit=8),
+            "open_threads": _compact_text_list(
+                arc.open_threads,
+                limit=8,
+                discard_obsolete=True,
+            ),
+            "key_characters": _compact_text_list(arc.key_characters, limit=12),
+            "key_locations": _compact_text_list(arc.key_locations, limit=12),
+            "keywords": _compact_text_list(arc.keywords, limit=12),
+            "important_turns": list(arc.important_turns or [])[:12],
+        }
+        for arc in arcs
+    ]
+    context = {
+        "protocol": {"name": "hp_simulator_story_arc_compression", "version": "1.0"},
+        "source_turn_start": source_start,
+        "source_turn_end": source_end,
+        "story_arcs": compact_arcs,
+    }
+    system = (
+        "你是《霍格沃兹人生模拟器》的长期记忆压缩整理者。"
+        "请把输入的多个连续故事弧压缩成一个可供后续剧情召回的长期记忆。"
+        "只能使用输入中的事实，不得补写或推测剧情。"
+        "摘要应优先保留会影响后续选择的因果链、重大人物关系、关键地点和仍可行动的未完事项。"
+        "删除重复、琐碎、已经解决、已经失效或对后续剧情没有作用的内容。"
+        "open_threads 只保留当前仍未解决且值得后续剧情处理的线索；无法确认仍有效的线索直接删除。"
+        "输出必须严格 JSON。\n\n"
+        f"{STORY_ARC_PROTOCOL}"
+    )
+    return [
+        {"role": "system", "content": system},
+        {
+            "role": "user",
+            "content": (
+                "请将以下故事弧压缩成一个故事弧。覆盖范围固定为"
+                f"第 {source_start}—{source_end} 轮：\n"
+                + json.dumps(context, ensure_ascii=False, default=str)
+            ),
+        },
+    ]
+
+
 def _response_content(raw_response: dict[str, Any]) -> Any:
     content = (
         raw_response.get("choices", [{}])[0]
@@ -458,6 +547,156 @@ async def _request_story_arc(
             return StoryArcResponse.model_validate(_response_content(raw))
         except (httpx.HTTPError, json.JSONDecodeError, TypeError, ValueError) as error:
             raise RuntimeError(f"故事弧连续两次生成失败：{error}") from first_error
+
+
+async def compress_story_arcs(db: Session, session_id: str) -> StoryArc:
+    if session_id in _compressing_sessions:
+        raise ValueError("当前故事弧正在压缩，请稍候")
+    active_job = db.scalar(
+        select(StoryArcGenerationJob.id).where(
+            StoryArcGenerationJob.session_id == session_id,
+            StoryArcGenerationJob.status.in_(("pending", "generating")),
+        )
+    )
+    if active_job is not None:
+        raise ValueError("当前有故事弧整理任务正在运行，请稍候再压缩")
+
+    arcs = list(
+        db.scalars(
+            select(StoryArc)
+            .where(
+                StoryArc.session_id == session_id,
+                StoryArc.status == "ready",
+                StoryArc.covered_turn_start.is_not(None),
+                StoryArc.covered_turn_end.is_not(None),
+            )
+            .order_by(
+                StoryArc.covered_turn_start.asc(),
+                StoryArc.covered_turn_end.asc(),
+            )
+        )
+    )
+    if len(arcs) < 2:
+        raise ValueError("至少需要两条已完成的故事弧才能压缩")
+    source_start = min(int(arc.covered_turn_start) for arc in arcs)
+    source_end = max(int(arc.covered_turn_end) for arc in arcs)
+    game_session = db.get(GameSession, session_id)
+    if game_session is None:
+        raise ValueError("存档不存在")
+
+    _compressing_sessions.add(session_id)
+    try:
+        settings = get_settings()
+        response = await asyncio.wait_for(
+            _request_story_arc(
+                OpenAICompatibleProvider(settings.llm),
+                build_story_arc_compression_messages(
+                    arcs,
+                    source_start=source_start,
+                    source_end=source_end,
+                ),
+            ),
+            timeout=settings.game.story_arc_job_timeout_seconds,
+        )
+        if any(turn < source_start or turn > source_end for turn in response.important_turns):
+            raise RuntimeError("故事弧 important_turns 超出了压缩范围")
+
+        source_turns = list(
+            db.scalars(
+                select(TurnRecord)
+                .where(
+                    TurnRecord.session_id == session_id,
+                    TurnRecord.sequence >= source_start,
+                    TurnRecord.sequence <= source_end,
+                )
+                .order_by(TurnRecord.sequence.asc())
+            )
+        )
+        source_turn_ids = [turn.id for turn in source_turns]
+        scope_key = f"arc-compressed-{source_start:04d}-{source_end:04d}"
+        summary = db.scalar(
+            select(StoryArc).where(
+                StoryArc.session_id == session_id,
+                StoryArc.scope_key == scope_key,
+            )
+        )
+        if summary is None:
+            summary = StoryArc(
+                session_id=session_id,
+                scope_key=scope_key,
+                status="ready",
+                title=response.title,
+                summary=str(response.summary).strip()[:4000],
+                causal_chain=_compact_text_list(response.causal_chain, limit=8),
+                open_threads=_compact_text_list(
+                    response.open_threads,
+                    limit=8,
+                    discard_obsolete=True,
+                ),
+                key_characters=_compact_text_list(response.key_characters, limit=15),
+                key_locations=_compact_text_list(response.key_locations, limit=15),
+                keywords=_compact_text_list(response.keywords, limit=15),
+                important_turns=response.important_turns,
+                source_turn_ids=source_turn_ids,
+                covered_turn_start=source_start,
+                covered_turn_end=source_end,
+            )
+            db.add(summary)
+        else:
+            summary.status = "ready"
+            summary.title = response.title
+            summary.summary = str(response.summary).strip()[:4000]
+            summary.causal_chain = _compact_text_list(response.causal_chain, limit=8)
+            summary.open_threads = _compact_text_list(
+                response.open_threads,
+                limit=8,
+                discard_obsolete=True,
+            )
+            summary.key_characters = _compact_text_list(response.key_characters, limit=15)
+            summary.key_locations = _compact_text_list(response.key_locations, limit=15)
+            summary.keywords = _compact_text_list(response.keywords, limit=15)
+            summary.important_turns = response.important_turns
+            summary.source_turn_ids = source_turn_ids
+            summary.covered_turn_start = source_start
+            summary.covered_turn_end = source_end
+            summary.version = (summary.version or 0) + 1
+
+        existing_job = db.scalar(
+            select(StoryArcGenerationJob).where(
+                StoryArcGenerationJob.session_id == session_id,
+                StoryArcGenerationJob.source_turn_start == source_start,
+                StoryArcGenerationJob.source_turn_end == source_end,
+            )
+        )
+        if existing_job is None:
+            existing_job = StoryArcGenerationJob(
+                session_id=session_id,
+                status="ready",
+                request_id=f"arc-compress-{uuid4().hex}",
+                source_turn_start=source_start,
+                source_turn_end=source_end,
+                source_turn_ids=source_turn_ids,
+                source_state_version=game_session.state_version,
+                attempt=1,
+                completed_at=utc_now(),
+            )
+            db.add(existing_job)
+        else:
+            existing_job.status = "ready"
+            existing_job.source_turn_ids = source_turn_ids
+            existing_job.error = None
+            existing_job.completed_at = utc_now()
+
+        for arc in arcs:
+            arc.status = "merged"
+        db.commit()
+        db.refresh(summary)
+        return summary
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        _compressing_sessions.discard(session_id)
 
 
 async def _run_story_arc_job(job_id: str) -> None:

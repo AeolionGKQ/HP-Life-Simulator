@@ -6,12 +6,20 @@ from backend.app.schemas.game import SetupOption, SetupStep
 # 兼容曾经使用过的单一起点值；新角色创建只展示下面四个预设节点。
 FIXED_STARTING_POINT_ID = "owl_letter_arrival"
 
+# 邓布利多时代的【直入终局】起点：玩家已完成七年学业，直接进入1899年的山谷。
+DUMBLEDORE_ENDGAME_STARTING_POINT_IDS = (
+    "godrics_hollow_1899_summer",
+    "godrics_hollow_1899_fall",
+)
+
 STARTING_POINT_IDS = {
     FIXED_STARTING_POINT_ID,
     "before_first_letter",
     "diagon_alley",
     "platform_nine_three_quarters",
     "sorting_ceremony",
+    "godrics_hollow",
+    *DUMBLEDORE_ENDGAME_STARTING_POINT_IDS,
 }
 
 
@@ -39,8 +47,8 @@ def option(
 SETUP_STEPS = [
     SetupStep(
         step=1,
-        title="时代",
-        description="选择故事所在的魔法史时期。当前仅开放剧情内容已经完善的子世代；其余三个世代仍共用相同系统，但需要完成剧情后才可选择。",
+        title="选择世代",
+        description="四条世代线共用同一套人生系统，却有完全不同的空气、人物与命运。请选择你将踏入的魔法史时期：邓布利多时代、亲世代、子世代，或现代。",
         options=[
             option(
                 era["id"],
@@ -71,7 +79,7 @@ SETUP_STEPS = [
     SetupStep(
         step=4,
         title="生日",
-        description="每个巫师出生的那一天，都像一颗落入时间长河的星辰。请以月-日-年的格式写下这颗星辰亮起的日期，它将成为年龄、记忆与命运流转的起点。",
+        description="每个巫师出生的那一天，都像一颗落入时间长河的星辰。请以年-月-日的格式写下这颗星辰亮起的日期，它将成为年龄、记忆与命运流转的起点。",
         options=[],
         selection_mode="text",
     ),

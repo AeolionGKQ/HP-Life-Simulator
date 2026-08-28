@@ -41,3 +41,4 @@ class SaveExport(BaseModel):
     long_term_memories: list[dict[str, Any]]
     story_summaries: list[dict[str, Any]]
     story_arcs: list[dict[str, Any]]
+

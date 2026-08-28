@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
+from datetime import date
 from types import SimpleNamespace
 from typing import Any
 
@@ -21,6 +22,7 @@ from backend.app.services.turns import (
     _action_text,
     _build_action,
     _normalize_memory_importance,
+    _refresh_npc_ages,
     _request_response,
     _resolve_selected_choice,
 )
@@ -80,6 +82,12 @@ def test_modern_prompt_omits_course_system_context() -> None:
                 "course_skill": False,
                 "level": 1,
             },
+            "expecto_patronum": {
+                "id": "expecto_patronum",
+                "name": "呼神护卫",
+                "level": 1,
+                "learned": True,
+            },
         },
     }
     messages = _build_messages(state, era_id="modern")
@@ -95,6 +103,8 @@ def test_modern_prompt_omits_course_system_context() -> None:
     assert "course_history" not in context["player_state"]["school"]
     assert "charms" not in context["current_skills"]
     assert "wandwork" in context["current_skills"]
+    assert "已学会【呼神护卫】" in system_prompt
+    assert "角色未学会【呼神护卫】时无法召唤守护神" not in system_prompt
 
 
 def test_second_generation_prompt_keeps_course_system_context() -> None:
@@ -116,6 +126,139 @@ def test_second_generation_prompt_keeps_course_system_context() -> None:
     assert "course_catalog" in context
     assert "course_rules" in context
     assert context["current_courses"]["active_courses"] == ["charms"]
+
+
+def test_dumbledore_prompt_keeps_courses_and_rich_era_background() -> None:
+    messages = _build_messages(
+        {
+            "school": {
+                "grade": "not_enrolled",
+                "enrollment_started": False,
+                "sorting_completed": False,
+            },
+            "current_context": {
+                "current_date": "1892-07-01",
+                "location_id": "godrics_hollow",
+                "activity": "godrics_hollow",
+            },
+            "story_milestones": {
+                "wand_obtained": False,
+                "sorting_completed": False,
+            },
+            "skills": {},
+        },
+        era_id="dumbledore_era",
+    )
+    system_prompt = messages[0]["content"]
+    context = json.loads(messages[1]["content"].split("\n", 1)[1])
+
+    assert "课程状态是程序权威" in system_prompt
+    assert "历史世代" in system_prompt
+    assert "少年学生，不是校长" in system_prompt
+    assert "【强约束与弱约束】" in system_prompt
+    assert "generation.available_figures" in system_prompt
+    assert "被标注为留白、争议、约某年、可创作或不得宣称官方的内容" in system_prompt
+    assert "就要按架空历史推进" in system_prompt
+    assert "【现代世代｜时间扰动规则】" not in system_prompt
+    assert "现代世代不启用课程系统" not in system_prompt
+    assert context["generation"]["id"] == "dumbledore_era"
+    assert "煤油灯" in context["generation"]["era_background"]
+    assert context["generation"]["available_figures"]
+    assert any(item["npc_id"] == "albus_dumbledore" for item in context["generation"]["cast_index"])
+    assert "current_courses" in context
+    assert context["modern_context"] is None
+    assert "【邓布利多时代｜直入终局】" not in system_prompt
+
+
+def test_dumbledore_endgame_prompt_injects_endgame_rules() -> None:
+    messages = _build_messages(
+        {
+            "school": {
+                "grade": "left_school",
+                "departure_reason": "graduated_after_newts",
+                "enrollment_started": True,
+                "sorting_completed": True,
+            },
+            "current_context": {
+                "current_date": "1899-08-31",
+                "location_id": "godrics_hollow",
+                "activity": "godrics_hollow_1899_fall",
+            },
+            "story_milestones": {
+                "wand_obtained": True,
+                "sorting_completed": True,
+            },
+            "endgame_entry": {
+                "starting_point": "godrics_hollow_1899_fall",
+                "premise": "你与阿不思同窗七年，是挚友。",
+                "ariana_alive": False,
+                "grindelwald_present": False,
+            },
+            "skills": {
+                "expecto_patronum": {
+                    "id": "expecto_patronum",
+                    "name": "呼神护卫",
+                    "level": 1,
+                    "learned": True,
+                }
+            },
+        },
+        era_id="dumbledore_era",
+    )
+    system_prompt = messages[0]["content"]
+    context = json.loads(messages[1]["content"].split("\n", 1)[1])
+
+    assert "【邓布利多时代｜直入终局】" in system_prompt
+    assert "本规则覆盖" in system_prompt
+    assert "不得指认杀死阿利安娜的咒语来自谁" in system_prompt
+    assert "已学会【呼神护卫】" in system_prompt
+    assert "角色未学会【呼神护卫】时无法召唤守护神" not in system_prompt
+    assert "godrics_hollow_1899_fall" in system_prompt
+    assert "分院仪式的当前节点" in system_prompt
+    assert "【分院】剧情真正完成之前" not in system_prompt
+    assert "在【奥利凡德魔杖店】剧情真正完成之前" not in system_prompt
+    assert context["player_state"]["endgame_entry"]["ariana_alive"] is False
+    assert context["generation"]["mainline_phase"]["id"] == "greater_good_summer"
+
+
+def test_parent_prompt_keeps_courses_and_student_snape() -> None:
+    messages = _build_messages(
+        {
+            "school": {
+                "grade": "year_1",
+                "enrollment_started": True,
+                "sorting_completed": False,
+                "active_courses": ["charms"],
+            },
+            "current_context": {
+                "current_date": "1971-09-01",
+                "location_id": "platform_nine_three_quarters",
+                "activity": "platform_nine_three_quarters",
+            },
+            "story_milestones": {
+                "wand_obtained": True,
+                "sorting_completed": False,
+            },
+            "skills": {},
+        },
+        era_id="parent_generation",
+    )
+    system_prompt = messages[0]["content"]
+    context = json.loads(messages[1]["content"].split("\n", 1)[1])
+
+    assert "课程状态是程序权威" in system_prompt
+    assert "作者资料与角色认知边界" in system_prompt
+    assert "成年身份不自动等于凤凰社成员" in system_prompt
+    assert "斯莱特林学生，不是魔药课教授" in system_prompt
+    assert "【现代世代｜时间扰动规则】" not in system_prompt
+    assert context["generation"]["id"] == "parent_generation"
+    assert "摇滚乐" in context["generation"]["era_background"]
+    snape = next(
+        item for item in context["generation"]["cast_index"] if item["npc_id"] == "severus_snape"
+    )
+    assert "教授" in snape["must_not"][0]
+    assert context["current_courses"]["active_courses"] == ["charms"]
+    assert context["story_milestones"]["sorting_completed"] is False
 
 
 def test_turn_system_prompt_contains_parseable_response_templates() -> None:
@@ -672,6 +815,29 @@ def test_long_term_memory_requires_numeric_importance() -> None:
 )
 def test_memory_importance_fallback_never_raises(value: Any, expected: int) -> None:
     assert _normalize_memory_importance(value) == expected
+
+
+def test_refresh_npc_ages_freezes_deceased_characters() -> None:
+    alive = SimpleNamespace(
+        npc_id="albus_dumbledore",
+        state={"age": 18, "age_reference_date": "1899-08-31"},
+    )
+    deceased = SimpleNamespace(
+        npc_id="ariana_dumbledore",
+        state={
+            "age": 14,
+            "age_reference_date": "1899-08-31",
+            "life_status": "deceased",
+        },
+    )
+
+    ages = _refresh_npc_ages([alive, deceased], date(1905, 1, 1))
+
+    assert ages["albus_dumbledore"] == 24
+    assert alive.state["age"] == 24
+    assert ages["ariana_dumbledore"] == 14
+    assert deceased.state["age"] == 14
+    assert deceased.state["age_reference_date"] == "1899-08-31"
 
 
 class _SequencedProvider:

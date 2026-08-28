@@ -676,6 +676,9 @@ textarea:focus { border-color: var(--accent); background: #101610; outline: 0; }
 .journal-entry p { margin: 0; color: var(--muted); font: 12px/1.7 var(--sans); }
 .journal-sequence { color: var(--accent); font: 650 12px var(--sans); }
 .story-arc-panel { display: grid; gap: 16px; }
+.story-arc-actions { display: grid; gap: 8px; }
+.story-arc-actions .secondary-button { justify-self: start; }
+.story-arc-actions-hint { color: var(--muted); font: 12px/1.7 var(--sans); }
 .story-arc-list { display: grid; gap: 9px; }
 .story-arc-card {
   padding: 16px;
@@ -756,6 +759,7 @@ textarea:focus { border-color: var(--accent); background: #101610; outline: 0; }
   font: 11px/1.6 var(--sans);
 }
 .save-import-input { display: none; }
+.save-feedback { margin: 14px 0 0; }
 .save-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 9px; margin-top: 22px; }
 .save-generation-group { grid-column: 1 / -1; display: grid; gap: 9px; }
 .save-generation-heading { display: flex; align-items: baseline; justify-content: space-between; padding: 4px 2px 0; }

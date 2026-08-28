@@ -173,6 +173,7 @@ def _load_runtime_unlocked(files_dir: str) -> dict[str, Any]:
     )
     from backend.app.services.turns import TurnGenerationError, generate_turn
     from backend.app.services.story_arcs import (
+        compress_story_arcs,
         job_to_dict,
         list_story_arc_reads,
         repair_orphaned_story_arc_jobs,
@@ -221,6 +222,7 @@ def _load_runtime_unlocked(files_dir: str) -> dict[str, Any]:
         "save_setup_answer": save_setup_answer,
         "TurnGenerationError": TurnGenerationError,
         "generate_turn": generate_turn,
+        "compress_story_arcs": compress_story_arcs,
         "job_to_dict": job_to_dict,
         "list_story_arc_reads": list_story_arc_reads,
         "retry_story_arc_job": retry_story_arc_job,
@@ -494,6 +496,18 @@ def request(path: str, method: str, body: str, files_dir: str) -> str:
                     runtime["retry_story_arc_job"](db, session_id)
                 )
             )
+        if suffix == "story-arcs/compress" and method == "POST":
+            merged = _run_async(
+                runtime["compress_story_arcs"],
+                db,
+                session_id,
+            )
+            merged_read = next(
+                item
+                for item in runtime["list_story_arc_reads"](db, session_id)
+                if item["scope_key"] == merged.scope_key
+            )
+            return _dump(merged_read)
         if suffix == "relationships" and method == "GET":
             return _dump(
                 [

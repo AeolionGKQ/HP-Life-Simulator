@@ -29,12 +29,14 @@ def test_four_eras_match_world_bible() -> None:
     eras = response.json()
     assert [(era["name"], era["years"]) for era in eras] == [
         ("邓布利多时代", "1892–1899"),
-        ("亲世代", "1971–1978"),
+        ("亲世代", "1971–1981+"),
         ("子世代", "1991–1998"),
         ("现代", "2020+"),
     ]
     assert all(era["mainline"] for era in eras)
     assert [era["id"] for era in eras if era["available"]] == [
+        "dumbledore_era",
+        "parent_generation",
         "second_generation",
         "modern",
     ]

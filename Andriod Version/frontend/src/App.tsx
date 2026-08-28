@@ -31,8 +31,8 @@ import {
   type SaveExport,
   type SetupView,
 } from "./api";
-import { GameView } from "./GameView";
 import { isAndroidNative, pickTextFile, saveTextFile } from "./pythonBridge";
+import { GameView } from "./GameView";
 
 const menuItems = [
   { label: "剧情", icon: BookOpenText },
@@ -70,17 +70,12 @@ export function App() {
   const [creating, setCreating] = useState(false);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [setup, setSetup] = useState<SetupView | null>(null);
-  const [setupSessionId, setSetupSessionId] = useState<string | null>(null);
   const [setupAnswer, setSetupAnswer] = useState("");
   const [setupLoading, setSetupLoading] = useState<"answer" | "navigate" | "confirm" | null>(null);
-  const [newSessionRequest, setNewSessionRequest] = useState(0);
   const [worldlineRate, setWorldlineRate] = useState(0);
   const [configOpen, setConfigOpen] = useState(false);
   const configTriggerRef = useRef<HTMLButtonElement>(null);
   const configDialogRef = useRef<HTMLElement>(null);
-  const setupRequestIdRef = useRef(0);
-  const pendingNewSessionFocusRef = useRef(false);
-  const emptyPanelRef = useRef<HTMLDivElement>(null);
   const [configDraft, setConfigDraft] = useState({
     base_url: "",
     api_key: "",
@@ -92,6 +87,7 @@ export function App() {
   const [renameDraft, setRenameDraft] = useState("");
   const [saveManaging, setSaveManaging] = useState(false);
   const [saveNotice, setSaveNotice] = useState("");
+  const [saveError, setSaveError] = useState("");
   const importInputRef = useRef<HTMLInputElement>(null);
   const saveNoticeTimerRef = useRef<number | null>(null);
 
@@ -121,14 +117,9 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    void api.health()
-      .then(setHealth)
-      .catch((reason: unknown) => {
-        setError(reason instanceof Error ? reason.message : "无法连接本地后端");
-      });
-
-    void Promise.all([api.llmConfig(), api.sessions(), api.eras()])
-      .then(([llmResponse, sessionResponse, eraResponse]) => {
+    void Promise.all([api.health(), api.llmConfig(), api.sessions(), api.eras()])
+      .then(([healthResponse, llmResponse, sessionResponse, eraResponse]) => {
+        setHealth(healthResponse);
         setLlm(llmResponse);
         setSessions(sessionResponse);
         setEras(eraResponse);
@@ -139,46 +130,19 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    const requestSessionId = selectedSessionId;
-    const requestId = setupRequestIdRef.current + 1;
-    setupRequestIdRef.current = requestId;
-    if (!requestSessionId) {
+    if (!selectedSessionId) {
       setSetup(null);
-      setSetupSessionId(null);
       return;
     }
-
-    setSetup(null);
-    setSetupSessionId(null);
-    void api.setup(requestSessionId)
+    void api.setup(selectedSessionId)
       .then((nextSetup) => {
-        if (setupRequestIdRef.current !== requestId) return;
         setSetup(nextSetup);
-        setSetupSessionId(requestSessionId);
         if (nextSetup.completed) setActiveMenu("剧情");
       })
       .catch((reason: unknown) => {
-        if (setupRequestIdRef.current !== requestId) return;
         setError(reason instanceof Error ? reason.message : "无法读取角色创建状态");
       });
-}, [selectedSessionId]);
-
-  useEffect(() => {
-    if (
-      !pendingNewSessionFocusRef.current
-      || activeMenu !== "角色"
-      || selectedSessionId
-      || setup
-    ) return;
-    const focusFrame = window.requestAnimationFrame(() => {
-      pendingNewSessionFocusRef.current = false;
-      emptyPanelRef.current?.scrollIntoView({
-        behavior: "smooth",
-        block: "start",
-      });
-    });
-    return () => window.cancelAnimationFrame(focusFrame);
-  }, [activeMenu, selectedSessionId, setup, newSessionRequest]);
+  }, [selectedSessionId]);
 
   useEffect(() => {
     if (!configOpen) return;
@@ -417,11 +381,8 @@ export function App() {
   }
 
   function beginNewSession() {
-    pendingNewSessionFocusRef.current = true;
-    setNewSessionRequest((current) => current + 1);
     setSelectedSessionId(null);
     setSetup(null);
-    setSetupSessionId(null);
     setSetupAnswer("");
     setName("");
     setError("");
@@ -429,6 +390,12 @@ export function App() {
     setRenamingSessionId(null);
     setRenameDraft("");
     setActiveMenu("角色");
+    window.requestAnimationFrame(() => {
+      document.querySelector(".empty-panel")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
   }
 
   async function saveRename(sessionId: string) {
@@ -483,6 +450,7 @@ export function App() {
   async function exportSave(session: GameSession) {
     setSaveManaging(true);
     setError("");
+    setSaveError("");
     dismissSaveNotice();
     try {
       const payload = await api.exportSession(session.id);
@@ -492,6 +460,7 @@ export function App() {
         .trim() || "霍格沃兹存档";
       const filename = `${safeName}.hp-save.json`;
       if (isAndroidNative()) {
+        // 安卓端必须走原生桥接，才能唤出系统的文件保存位置选择页面。
         await saveTextFile(filename, content);
       } else {
         const blob = new Blob([content], { type: "application/json" });
@@ -506,7 +475,7 @@ export function App() {
       }
       showSaveNotice(`已导出存档“${session.name}”。`);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "导出存档失败");
+      setSaveError(reason instanceof Error ? reason.message : "导出存档失败");
     } finally {
       setSaveManaging(false);
     }
@@ -515,10 +484,12 @@ export function App() {
   async function importSave(event?: ChangeEvent<HTMLInputElement>) {
     setSaveManaging(true);
     setError("");
+    setSaveError("");
     dismissSaveNotice();
     try {
       let content = "";
       if (isAndroidNative()) {
+        // 安卓端通过原生文件选择器读取存档，WebView 的 input[type=file] 不可靠。
         content = await pickTextFile();
       } else {
         const file = event?.target.files?.[0];
@@ -531,13 +502,12 @@ export function App() {
       setSessions((current) => [imported, ...current]);
       setSelectedSessionId(imported.id);
       setSetup(null);
-      setSetupSessionId(null);
       setSetupAnswer("");
       setWorldlineRate(0);
       setActiveMenu("角色");
       showSaveNotice(`已读取存档“${imported.name}”。`);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "读取存档失败");
+      setSaveError(reason instanceof Error ? reason.message : "读取存档失败");
     } finally {
       setSaveManaging(false);
     }
@@ -694,10 +664,7 @@ export function App() {
                   : "命运尚待书写"}
             </span>
           </div>
-          {selectedSessionId
-            && setupSessionId === selectedSessionId
-            && setup
-            && (!setup.completed || setup.attribute_initialization?.status !== "ready") ? (
+          {setup && (!setup.completed || setup.attribute_initialization?.status !== "ready") ? (
             <div className="setup-panel">
               <span className="setup-progress">
                 第 {setup.current_step} / {setup.steps_total} 步
@@ -740,106 +707,91 @@ export function App() {
                 </div>
               )}
               <div className="setup-input-row">
+                {setup.current_step > 1 && (
+                  <button
+                    className="secondary-button"
+                    disabled={setupLoading !== null}
+                    onClick={() => void navigateSetupBack()}
+                  >
+                    上一步
+                  </button>
+                )}
                 {setup.current.selection_mode !== "confirm" ? (
                   <>
                     {setup.current_step !== 1 && setup.current_step !== 14 && setup.current_step !== 15 && (
-                      <div className="setup-answer-field">
-                        {setup.current_step === 4 ? (
-                          <input
-                            aria-label="生日"
-                            autoComplete="bday"
-                            type="date"
-                            value={setupAnswer}
-                            onChange={(event) => setSetupAnswer(event.target.value)}
-                          />
-                        ) : (
-                          <textarea
-                            aria-label={setup.current.title}
-                            value={setupAnswer}
-                            onChange={(event) => setSetupAnswer(event.target.value)}
-                            placeholder={
-                              setup.current.selection_mode === "append"
-                                ? "点击预设会追加到这里，也可以继续输入，用逗号分隔"
-                                : setup.current_step === 2
-                                  ? "输入角色姓名"
-                                  : setup.current_step === 16
-                                    ? "选择上方预设，或写下你的独特守护神"
-                                    : setup.current_step === 17
-                                      ? "写下任何希望魔法世界记住的角色设定（可留空）"
-                                  : "选择上方预设，或输入自定义设定"
+                      setup.current_step === 4 ? (
+                        <input
+                          aria-label="生日"
+                          autoComplete="bday"
+                          type="date"
+                          value={setupAnswer}
+                          onChange={(event) => setSetupAnswer(event.target.value)}
+                        />
+                      ) : (
+                        <textarea
+                          aria-label={setup.current.title}
+                          value={setupAnswer}
+                          onChange={(event) => setSetupAnswer(event.target.value)}
+                          placeholder={
+                            setup.current.selection_mode === "append"
+                              ? "点击预设会追加到这里，也可以继续输入，用逗号分隔"
+                              : setup.current_step === 2
+                                ? "输入角色姓名"
+                                : setup.current_step === 16
+                                  ? "选择上方预设，或写下你的独特守护神"
+                                  : setup.current_step === 17
+                                    ? "写下任何希望魔法世界记住的角色设定（可留空）"
+                                : "选择上方预设，或输入自定义设定"
+                          }
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                              void submitSetupAnswer();
                             }
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
-                                void submitSetupAnswer();
-                              }
-                            }}
-                          />
-                        )}
-                      </div>
-                    )}
-                    <div className="setup-navigation-actions">
-                      {setup.current_step > 1 && (
-                        <button
-                          className="secondary-button"
-                          disabled={setupLoading !== null}
-                          onClick={() => void navigateSetupBack()}
-                        >
-                          上一步
-                        </button>
-                      )}
-                      <button
-                        className={
-                          setup.current_step === 1
-                            ? "primary-button setup-era-next"
-                            : setup.current_step === 15
-                              ? "primary-button setup-single-next"
-                              : "primary-button"
-                        }
-                        disabled={
-                          setupLoading !== null ||
-                          (
-                            !setupAnswer.trim()
-                            && setup.current_step !== 13
-                            && setup.current_step !== 17
-                          )
-                        }
-                        onClick={() => void submitSetupAnswer()}
-                      >
-                        {setupLoading === "answer"
-                          ? "保存中…"
-                          : setup.current_step === 1
-                            ? "以所选世代继续"
-                            : setup.current_step === 13 && !setupAnswer.trim()
-                              ? "不选择预设好友，继续"
-                              : setup.current_step === 17 && !setupAnswer.trim()
-                                ? "不再补充，继续"
-                                : "下一步"}
-                      </button>
-                    </div>
-                  </>
-                ) : (
-                  <div className="setup-navigation-actions">
-                    {setup.current_step > 1 && (
-                      <button
-                        className="secondary-button"
-                        disabled={setupLoading !== null}
-                        onClick={() => void navigateSetupBack()}
-                      >
-                        上一步
-                      </button>
+                          }}
+                        />
+                      )
                     )}
                     <button
-                      className="primary-button"
-                      disabled={setupLoading !== null}
-                      onClick={() => void confirmSetup()}
+                      className={
+                        setup.current_step === 1
+                          ? "primary-button setup-era-next"
+                          : setup.current_step === 15
+                            ? "primary-button setup-single-next"
+                            : "primary-button"
+                      }
+                      disabled={
+                        setupLoading !== null ||
+                        (
+                          !setupAnswer.trim()
+                          && setup.current_step !== 13
+                          && setup.current_step !== 17
+                        )
+                      }
+                      onClick={() => void submitSetupAnswer()}
                     >
-                      {setupLoading === "confirm"
-                        ? "确认中…"
-                        : setupLoading === "navigate"
-                          ? "返回中…"
-                          : "确认角色并开始"}
+                      {setupLoading === "answer"
+                        ? "保存中…"
+                        : setup.current_step === 1
+                          ? "以所选世代继续"
+                          : setup.current_step === 13 && !setupAnswer.trim()
+                            ? "不选择预设好友，继续"
+                            : setup.current_step === 17 && !setupAnswer.trim()
+                              ? "不再补充，继续"
+                            : "下一步"}
                     </button>
-                  </div>
+                  </>
+                ) : (
+                  <button
+                    className="primary-button"
+                    disabled={setupLoading !== null}
+                    onClick={() => void confirmSetup()}
+                  >
+                    {setupLoading === "confirm"
+                      ? "确认中…"
+                      : setupLoading === "navigate"
+                        ? "返回中…"
+                        : "确认角色并开始"}
+                  </button>
                 )}
               </div>
               <p className="setup-hint">
@@ -849,9 +801,7 @@ export function App() {
                   : setup.current.selection_mode !== "confirm" && " 可按 Ctrl + Enter 进入下一步。"}
               </p>
             </div>
-          ) : selectedSessionId
-            && setupSessionId === selectedSessionId
-            && setup?.completed ? (
+          ) : setup?.completed && selectedSessionId ? (
             <GameView
               sessionId={selectedSessionId}
               activeMenu={activeMenu}
@@ -860,7 +810,7 @@ export function App() {
               onWorldlineChange={setWorldlineRate}
             />
           ) : (
-            <div className="empty-panel" ref={emptyPanelRef}>
+            <div className="empty-panel">
               <span className="empty-icon" aria-hidden="true"><Sparkle /></span>
               <h3>从档案柜中取出一卷羊皮纸</h3>
               <p>为这段尚未书写的命运题名，随后将在角色创建的第一步选择时代。</p>
@@ -890,7 +840,6 @@ export function App() {
       </section>
 
       <section className="save-section">
-        {saveNotice && <div className="save-notice" role="status">{saveNotice}</div>}
         <div className="section-heading">
           <div>
             <p className="eyebrow">封存的世界线</p>
@@ -920,17 +869,19 @@ export function App() {
               <UploadSimple aria-hidden="true" />
               读取存档
             </button>
-            {!isAndroidNative() && (
-              <input
-                ref={importInputRef}
-                accept=".json,.hp-save.json,application/json"
-                className="save-import-input"
-                type="file"
-                onChange={(event) => void importSave(event)}
-              />
-            )}
           </div>
+          {!isAndroidNative() && (
+            <input
+              ref={importInputRef}
+              accept=".json,.hp-save.json,application/json"
+              className="save-import-input"
+              type="file"
+              onChange={(event) => void importSave(event)}
+            />
+          )}
         </div>
+        {saveError && <div className="error-banner save-feedback">{saveError}</div>}
+        {saveNotice && <div className="save-notice save-feedback" role="status">{saveNotice}</div>}
         <div className="save-grid">
           {sessions.length === 0 ? (
             <div className="save-empty">档案柜仍空空如也。第一卷命运，将从你的名字开始。</div>
@@ -988,7 +939,10 @@ export function App() {
                 </div>
                 <div className="save-card-actions">
                   <span className="version">v{session.state_version}</span>
-                  <button disabled={saveManaging} onClick={() => void exportSave(session)}>
+                  <button
+                    disabled={saveManaging}
+                    onClick={() => void exportSave(session)}
+                  >
                     <DownloadSimple aria-hidden="true" />导出
                   </button>
                   <button disabled={saveManaging} onClick={() => beginRename(session)}><PencilSimple aria-hidden="true" />重命名</button>
@@ -1010,16 +964,14 @@ function buildSaveGroups(sessions: GameSession[]) {
   const groups = new Map<string, { id: string; title: string; sessions: GameSession[] }>();
 
   for (const session of sessions) {
-    const groupId = session.era_id === "modern"
-      ? "modern"
-      : session.era_id === "second_generation"
-        ? "second_generation"
-        : "other";
-    const title = groupId === "modern"
-      ? "现代存档"
-      : groupId === "second_generation"
-        ? "子世代存档"
-        : "其他世代存档";
+    const titles: Record<string, string> = {
+      dumbledore_era: "邓布利多时代存档",
+      parent_generation: "亲世代存档",
+      second_generation: "子世代存档",
+      modern: "现代存档",
+    };
+    const groupId = titles[session.era_id] ? session.era_id : "other";
+    const title = titles[groupId] ?? "其他世代存档";
     const group = groups.get(groupId) ?? { id: groupId, title, sessions: [] };
     group.sessions.push(session);
     groups.set(groupId, group);
@@ -1109,6 +1061,9 @@ const STARTING_POINT_LABELS: Record<string, string> = {
   diagon_alley: "第一次踏入对角巷",
   platform_nine_three_quarters: "九又四分之三站台",
   sorting_ceremony: "分院时",
+  godrics_hollow: "戈德里克山谷",
+  godrics_hollow_1899_summer: "1899年夏·阿利安娜死亡之前",
+  godrics_hollow_1899_fall: "1899年夏·阿利安娜死亡之时",
 };
 
 const ORIGIN_LABELS: Record<string, string> = {

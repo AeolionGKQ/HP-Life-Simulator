@@ -47,3 +47,4 @@ def initialize_database() -> None:
     from backend.app import models  # noqa: F401
 
     Base.metadata.create_all(bind=get_engine())
+

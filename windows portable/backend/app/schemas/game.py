@@ -625,3 +625,4 @@ class MemoryRead(BaseModel):
     keywords: list[Any]
     facts: list[Any]
     open_threads: list[Any]
+

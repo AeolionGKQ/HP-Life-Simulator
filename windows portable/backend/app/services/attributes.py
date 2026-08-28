@@ -31,6 +31,25 @@ class AttributeInitializationError(RuntimeError):
     pass
 
 
+# 中断的生成任务不会留下后台进程，超过这个时长即视为已经废弃。
+ATTRIBUTE_GENERATION_TIMEOUT_SECONDS = 180
+
+
+def _generation_abandoned(initialization: dict[str, Any]) -> bool:
+    """判断上一次“生成中”状态是否因为中途退出而中断。"""
+    started_at = initialization.get("started_at")
+    if not isinstance(started_at, str) or not started_at:
+        return True
+    try:
+        started = datetime.fromisoformat(started_at)
+    except ValueError:
+        return True
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    elapsed = (datetime.now(timezone.utc) - started).total_seconds()
+    return elapsed >= ATTRIBUTE_GENERATION_TIMEOUT_SECONDS
+
+
 def _extract_content(raw: dict[str, Any]) -> str:
     try:
         content = raw["choices"][0]["message"]["content"]
@@ -121,7 +140,11 @@ async def initialize_attributes(
 ) -> dict[str, Any]:
     state = deepcopy(player_state.state)
     initialization = state.setdefault("attribute_initialization", {})
-    if initialization.get("status") == "generating":
+    if (
+        initialization.get("status") == "generating"
+        and not force
+        and not _generation_abandoned(initialization)
+    ):
         raise AttributeInitializationError("初始属性正在生成，请稍候")
     if force and (
         db.scalar(
@@ -143,6 +166,7 @@ async def initialize_attributes(
     adjustment_instruction = adjustment_instruction.strip()
     initialization["status"] = "generating"
     initialization["request_id"] = f"attribute-init-{uuid4().hex[:12]}"
+    initialization["started_at"] = datetime.now(timezone.utc).isoformat()
     initialization["adjustment_instruction"] = adjustment_instruction
     player_state.state = state
     flag_modified(player_state, "state")
@@ -167,6 +191,7 @@ async def initialize_attributes(
             "error": "无法连接模型服务或模型服务返回错误",
         }
         player_state.state = state
+        flag_modified(player_state, "state")
         db.commit()
         raise AttributeInitializationError(str(exc)) from exc
     except AttributeInitializationError as exc:
@@ -176,8 +201,20 @@ async def initialize_attributes(
             "error": str(exc),
         }
         player_state.state = state
+        flag_modified(player_state, "state")
         db.commit()
         raise
+    except Exception as exc:
+        # 任何未预料的异常都要先把状态落成 failed，否则存档会永远停在“生成中”。
+        state["attribute_initialization"] = {
+            **initialization,
+            "status": "failed",
+            "error": "初始属性生成过程中出现未预料的错误，请重新生成",
+        }
+        player_state.state = state
+        flag_modified(player_state, "state")
+        db.commit()
+        raise AttributeInitializationError(str(exc) or exc.__class__.__name__) from exc
     player_state.state = deepcopy(state)
     flag_modified(player_state, "state")
     game_session.status = "active"

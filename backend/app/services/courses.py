@@ -88,11 +88,7 @@ def get_courses_view(
         owl_results=_course_results(school.get("owl_results")),
         newt_results=_course_results(school.get("newt_results")),
         course_selection=selection,
-        course_history=[
-            CourseHistoryEntry.model_validate(item)
-            for item in school.get("course_history", [])
-            if isinstance(item, dict)
-        ],
+        course_history=_course_history_entries(school.get("course_history")),
     )
 
 
@@ -232,6 +228,40 @@ def _course_results(raw: Any) -> list[CourseResult]:
         )
         for course_id, result in raw.items()
     ]
+
+
+def _course_history_entries(raw: Any) -> list[CourseHistoryEntry]:
+    """读取课程历史时兼容早期存档中的简略毕业记录。"""
+    if not isinstance(raw, list):
+        return []
+    entries: list[CourseHistoryEntry] = []
+    valid_grades = {
+        "not_enrolled",
+        "year_1",
+        "year_2",
+        "year_3",
+        "year_4",
+        "year_5",
+        "year_6",
+        "year_7",
+        "left_school",
+    }
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        normalized = dict(item)
+        if not normalized.get("school_year") and normalized.get("year") is not None:
+            year = normalized["year"]
+            if isinstance(year, int) or (isinstance(year, str) and year.isdigit()):
+                end_year = int(year)
+                normalized["school_year"] = f"{end_year - 1}-{end_year}"
+        if not normalized.get("school_year") or normalized.get("grade") not in valid_grades:
+            continue
+        try:
+            entries.append(CourseHistoryEntry.model_validate(normalized))
+        except ValueError:
+            continue
+    return entries
 
 
 def _selection_model(raw: Any) -> CourseSelection | None:

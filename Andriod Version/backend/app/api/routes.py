@@ -64,6 +64,7 @@ from backend.app.services.setup import (
 )
 from backend.app.services.turns import TurnGenerationError, generate_turn
 from backend.app.services.story_arcs import (
+    compress_story_arcs,
     job_to_dict,
     list_story_arc_reads,
     retry_story_arc_job,
@@ -464,6 +465,29 @@ async def retry_story_arc(
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post(
+    "/sessions/{session_id}/story-arcs/compress",
+    response_model=StoryArcRead,
+)
+async def compress_session_story_arcs(
+    session_id: str,
+    db: Session = Depends(get_db),
+) -> StoryArcRead:
+    _require_session(db, session_id)
+    try:
+        merged = await compress_story_arcs(db, session_id)
+        merged_read = next(
+            item
+            for item in list_story_arc_reads(db, session_id)
+            if item["scope_key"] == merged.scope_key
+        )
+        return StoryArcRead.model_validate(merged_read)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"故事弧压缩失败：{exc}") from exc
 
 
 @router.get("/sessions/{session_id}/setup", response_model=SetupView)

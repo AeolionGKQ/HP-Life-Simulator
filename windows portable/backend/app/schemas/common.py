@@ -27,3 +27,4 @@ class LLMConnectionResult(BaseModel):
     model: str
     message: str
     latency_ms: int
+

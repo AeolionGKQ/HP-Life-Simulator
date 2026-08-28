@@ -196,8 +196,11 @@ STARTING_POINT_RULES = """程序已经在 player_state.current_context 中确定
 仅在第一回合展开当前起点的核心场景；后续回合必须承接已经发生的剧情，不要反复重演开篇。
 当 activity=before_first_letter 时，第一回合必须从 1991-07-01 家中收到猫头鹰送来的霍格沃茨来信展开；
 当 activity=diagon_alley 时，第一回合必须从第一次踏入对角巷的当前节点展开；
-当 activity=platform_nine_three_quarters 时，第一回合必须从 1991-09-01 九又四分之三站台的当前节点展开；
-当 activity=sorting_ceremony 时，第一回合必须从分院仪式的当前节点展开。
+当 activity=platform_nine_three_quarters 时，第一回合必须从当前世代开局日期的九又四分之三站台展开；
+当 activity=sorting_ceremony 时，第一回合必须从分院仪式的当前节点展开；
+当 activity=godrics_hollow 时，第一回合必须从 1892-07-01 戈德里克山谷的当前节点展开，而不是霍格沃茨站台或分院；此时玩家已经收到霍格沃茨录取通知书，角色创建时填写的魔杖、宠物和随身物品也都已备齐，不要重演收信、对角巷采购或选购魔杖，九月才正式入学。
+当 activity=godrics_hollow_1899_summer 时，第一回合必须从 1899-07-10 戈德里克山谷的午后展开：玩家已经毕业，正陪刚失去母亲的阿不思待在山谷，而盖勒特·格林德沃刚刚投奔姑婆巴希达·巴沙特住了下来。不要重演入学、分院、课堂或1892年的夏天。
+当 activity=godrics_hollow_1899_fall 时，第一回合必须从 1899-08-31 傍晚混战刚刚结束的那一刻展开：阿利安娜已经死去，阿不思跪在地上抱着妹妹，格林德沃夺门而逃，阿不福思在一旁。这一刻正在发生，不是回忆，也不得改写成尚未发生。
 不得把当前起点改写成其他起点，也不得因为角色知道或不知道魔法界而跳过玩家选定的起点。"""
 
 WAND_AVAILABILITY_RULES = """player_state.story_milestones.wand_obtained 当前为 false。
@@ -220,8 +223,12 @@ STORY_MILESTONE_RULES = """events 只能记录本回合实际发生并完成的�
 同一种里程碑一旦已经在 player_state.story_milestones 中为 true，后续回合不要重复返回。"""
 
 PATRONUS_RULES = """角色创建时选择的守护神形态会保存在 player_state.patronus 中，但这只是角色潜在的守护神形态。
-角色未学会【呼神护卫】时无法召唤守护神；只有 player_state.skills 明确记录已经掌握该技能后才可召唤。
-不能因为已经选择守护神形态，就让角色提前施放【呼神护卫】、召出银色动物或拥有该技能。"""
+   角色未学会【呼神护卫】时无法召唤守护神；只有 player_state.skills 明确记录已经掌握该技能后才可召唤。
+   不能因为已经选择守护神形态，就让角色提前施放【呼神护卫】、召出银色动物或拥有该技能。"""
+
+PATRONUS_LEARNED_RULES = """角色创建状态已经明确记录 player_state.skills.expecto_patronum 为已学会【呼神护卫】。
+player_state.patronus 中的形态已经可供角色尝试召唤；不得再输出“守护神不可用”“尚未学会【呼神护卫】”或要求角色先完成学习。
+施放仍然必须结合当前魔力、精神状态、情绪和场景难度判断，已学会不代表每次施放都自动成功。"""
 
 REPUTATION_RULES = """声望是程序掌握的总体社会印象，player_state.reputation.score 的合法范围是 -100 到 100。
 正数表示更偏向正义、守序、可信赖的“白巫师”倾向，负数表示更偏向危险、残酷、黑暗的“黑巫师”倾向。
@@ -401,7 +408,12 @@ anchor_events 和 relevant_nodes 不是玩家必须完成的任务；除非当�
 如果玩家改变主线，必须保留人物反应、关系、声望、资源、世界线或后续因果代价；
 高世界线偏移不代表可以跳离当前世代，也不代表可以凭空抹除战争、社会压力或既有因果。
 relevant_nodes 中的 status 只能作为叙事参考：approaching 可以通过传闻或氛围暗示，
-active 才可能成为当前阶段焦点，altered 必须承接已经发生的变化，不得把 resolved 节点重新写成未发生。"""
+active 才可能成为当前阶段焦点，altered 必须承接已经发生的变化，不得把 resolved 节点重新写成未发生。
+【强约束与弱约束】人物设定与禁止事项分两类，优先级不同。
+强约束不可被任何行动改变：人物在当前年份是否已经出生或已经死亡、此刻的年龄与身份职务，以及任何人都不得知道本时代之后才发生的事、不得提及尚未出现的人物、名词、咒语或事件。这类边界在任何情况下都不能被打破。
+弱约束是人物与社会此刻的行为倾向和处境，例如"被家人藏在屋里""不与外人来往""默认要到某年才出现""不会公开谈论家族丑闻"。
+玩家的实际行动优先级最高：只要过程在逻辑上站得住、代价被承担，弱约束可以被打破。例如玩家逐步取得邓布利多家的信任之后，可以带阿利安娜出门、让她第一次看清魔法界，从而打破"她必须被藏起来"。
+打破弱约束必须写出可信的路径与后果（当事人反应、家人态度、流言、风险、关系与世界线变化），不得用一句话直接跳到结果；也不得反过来用弱约束否决玩家已经完成的合理行动。"""
 
 MODERN_GENERATION_RULES = """【现代世代｜时间扰动规则】
 当前存档属于现代世代，开局为2020-09-01、四年级和九又四分之三站台。
@@ -416,6 +428,50 @@ timeline_effect 是提案，不是程序状态覆盖。changed_facts 只能写�
 proposed_disturbance_delta 只能写相对建议，程序会根据玩家行动重新裁决。
 如果上下文提供 pending_consequence，必须在本回合的叙事中承接它，不得取消、更换或重复已经触发的阈值。
 时间扰动升高不等于游戏结束；修复、局部保留、替代现实和远离核心事件都必须保留玩家选择与代价。"""
+
+HISTORICAL_GENERATION_RULES = """【历史世代｜背景与角色设定】
+当前存档不是1991年的子世代，也不是2020年的现代世代。模型对这个时代的稳定知识通常少于哈利一代，因此必须把上下文中的 generation.era_background、generation.era_frame、generation.cast_index 和 npcs[].state 当作主要设定来源，而不是用后世流行印象填空。
+generation.era_background 和 generation.era_frame 需要被充分使用：气味、礼仪、学校气派、政治空气、家庭秘密和尚未发生的事，都应当进入日常叙事的质地，而不是只在主线高潮才出现。
+generation.cast_index 给出的是较完整的角色档案，包括公开身份、性格、背景、当前生活、动机、恐惧、秘密、说话方式和出现条件。扮演这些人物时要依据档案，而不是后世身份：
+- 邓布利多时代的阿不思是少年学生，不是校长；
+- 亲世代的斯内普是斯莱特林学生，不是魔药课教授；
+- 亲世代的麦格是变形术教授，不是校长；
+- 亲世代的邓布利多才是校长。
+generation.forbidden_figures 列出的人物不得进入当前日常现实。若需要任课老师、店主、同学或路人，必须按这个时代的气味自行创建新 NPC，并给予新的姓名与身份。
+自创 NPC 一旦被赋予姓名并与玩家产生实质互动（授课、交易、结怨、结交、给出情报等），首次出场就必须在 memory_update 中写入长期记忆，记下姓名、身份与关系起点；此后各回合必须沿用同一姓名与身份，不得改名、改任教科目或改学院。
+只在一两句里掠过的背景人物不必命名，也不必写入长期记忆：可以直接用"魔药课教授""一个斯莱特林高年级学生""柜台后的老店员"这类代称。等这个人真正进入剧情、需要被反复提起时，再给他姓名并写入长期记忆。
+generation.available_figures 是这个时代确实已经存在的人物与既有设定，只是不一定要出场。它们可以用来充实报纸、课堂、藏书、墓园、家族闲谈和考场等背景，也可以在合适时机真正登场；每条都给出了 era_status（此时的处境）和 how_to_use（用法与边界），使用时必须遵守其中的边界。这份清单不是任务列表，不必逐条塞进剧情。
+generation.mainline_phase.future_timeline 只在玩家走出学校、进入本世代主线之后的漫长年代时出现，它给出这段历史的既定走向，用作远方压力、报纸标题和多年后的回声。其中的年份是硬约束：只有当前日期真正到达对应年份，相应事件才可能成为现实，在此之前不得让任何人知道、说出或提前触发；玩家的行动可以改变这条线上的任何一环，但必须留下代价与裂痕。
+future_timeline 中被点明为硬锚点的事件属于普通正史线，只能被玩家的实际行动改变，不能被模型顺手改写或跳过；被标注为留白、争议、约某年、可创作或不得宣称官方的内容，必须按该标注处理：留白处可以自由创作但不得声称是既定史实，争议设定可以不采用，模糊年份要继续写成"约某年"，未确认的机制不得被扩展成固定规则。
+若玩家的行动真的改写了硬锚点，本回合起就要按架空历史推进：承接已经成立的变化，重算相关人物的命运、制度、舆论和后续因果，不得在后面的回合悄悄恢复原本的历史结局。
+
+初始好友、npcs[] 和 generation.cast_index 中的人物只表示玩家可能与之建立联系，不表示对方此刻在场或已经熟识。若某人的 appearance_conditions 或 current_life 说明他在当前日期尚未出现、尚未被允许接近或不在当前地点，本回合就不得让他出场，也不得写成旧识；只能通过传闻、书信、家人转述或远方消息存在，等条件真正满足后再在叙事中兑现这段关系。
+本世代主线比子世代更弱。默认每回合只保留时代气味和个人生活；没有玩家主动靠近时，不要把1899年夏天、1976年那句咒骂或1981年万圣节写成当前场景。
+课程系统与子世代一致，继续使用年级、选课、考试和课程技能规则。世界线继续使用 offset_rate，不要写入时间扰动、timeline_effect 或 modern_arc。"""
+
+
+PARENT_GENERATION_RULES = """【亲世代｜作者资料与角色认知边界】
+亲世代的 generation.cast_index 是根据当前日期和已经成立的证据生成的叙事投影，不是可以被全知使用的角色未来档案。
+generation.adult_timeline 是1978年毕业后的成年与战争背景说明，不能把其中的远期事件当成本回合已经发生。
+generation.cast_index 中的 background、secrets 和后期经历可能来自作者侧长期剧情资料；它们不等于当前角色知道的事实，也不等于本回合已经发生。
+当前日期以前的内容只能作为角色当前生活和行为依据。未来内容只有在日期到达、玩家调查获得可信证据，或相关事件已经在当前状态和长期记忆中成立后，才可以逐步显现。
+不得用全知旁白、角色内心独白、预言式语气或“后来事实证明”提前揭示角色未来的背叛、死亡、阿尼马格斯、组织归属或后世身份。
+1971年至1978年6月30日，亲世代角色按在校学生处理；1978年7月1日起，已毕业角色按成年巫师处理。成年身份不自动等于凤凰社成员、食死徒成员或任何战争阵营。
+凤凰社与食死徒都是秘密组织，不得向没有来源和关系依据的普通学生公开成员名单、据点、内部计划或预言全文；食死徒也不等同于所有斯莱特林学生。
+1981年10月31日不是游戏终点。玩家可以参战、调查、警告、协助、远离或错过战争节点；1981年后的叙事必须承接已成立的关系、伤势、证据和 worldline.offset_rate，不能强制恢复原著结局，也不能召回子世代主线。"""
+
+DUMBLEDORE_ENDGAME_RULES = """【邓布利多时代｜直入终局】
+当前存档使用【直入终局】起点：玩家不是新生，而是1892年入学、1899年通过N.E.W.T.毕业的成年巫师，此刻就在戈德里克山谷。
+player_state.endgame_entry.premise 是这条存档的既定前史，必须当作已经发生的事实承接，不得当成传闻、梦境或待验证的说法：
+- 玩家与阿不思·邓布利多在霍格沃茨同窗七年，是彼此最信任的挚友；这段关系不需要从陌生人重新建立。
+- 肯德拉·邓布利多已经去世，阿不思因此被迫留在山谷照顾弟妹。
+- 盖勒特·格林德沃已经投奔姑婆巴希达·巴沙特，死亡圣器、终结保密法、"更伟大的利益"和两人以血立下的誓约都已经被谈过。
+- endgame_entry.ariana_alive 与 grindelwald_present 说明此刻阿利安娜是否还活着、格林德沃是否还在山谷；npcs[].state.life_status="deceased" 的人物已经死亡，不得让他们说话、行动或被治疗复活。
+本规则覆盖"没有玩家主动靠近时不要把1899年夏天写成当前场景"这条默认限制：1899年夏天就是当前场景，第一回合必须直接落在其中。
+玩家已经离校：school.grade=left_school、departure_reason=graduated_after_newts。不得安排课程、作业、考试、宿舍、分院或学生身份福利，也不得让玩家以学生理由回到霍格沃茨。七年课程技能已经播种，O.W.L. 与 N.E.W.T. 都已在校期间完成，不得要求补考或补记成绩。
+两个方向都必须保持开放，且都要有代价：玩家可以试图弥合兄弟裂痕、救下阿利安娜、把阿不思从格林德沃身边拉回来、或在此后阻止格林德沃；也可以怂恿阿不思接受"更伟大的利益"、协助格林德沃、甚至自己成为他的同盟。模型不得预设玩家站在哪一边，也不得因为原著结局而让玩家的努力自动失效。
+即使玩家亲眼目击了那场混战，也不得指认杀死阿利安娜的咒语来自谁：可以给出彼此矛盾的记忆、证词和怀疑，但答案必须保持未知。
+玩家的行动如果真的改写了1899年的结局或格林德沃此后的道路，就按架空历史继续推进，并让人物、关系、家庭、舆论与欧洲局势承接这些变化。"""
 
 
 def build_turn_messages(
@@ -442,6 +498,16 @@ def build_turn_messages(
     story_milestones = player_state.state.get("story_milestones", {})
     if not isinstance(story_milestones, dict):
         story_milestones = {}
+    skills = player_state.state.get("skills", {})
+    patronus_learned = isinstance(skills, dict) and any(
+        isinstance(skill, dict)
+        and (
+            skill.get("id") == "expecto_patronum"
+            or skill.get("name") == "呼神护卫"
+        )
+        and skill.get("learned", True) is not False
+        for skill in skills.values()
+    )
     wand_obtained = (
         story_milestones.get("wand_obtained") is True
         or (
@@ -452,11 +518,16 @@ def build_turn_messages(
             )
         )
     )
-    sorting_completed = (
-        story_milestones.get("sorting_completed") is True
-        or bool(school.get("sorting_completed"))
-        or enrollment_started
-    )
+    explicit_sorting = story_milestones.get("sorting_completed")
+    school_sorting = school.get("sorting_completed")
+    if explicit_sorting is False or school_sorting is False:
+        sorting_completed = False
+    else:
+        sorting_completed = (
+            explicit_sorting is True
+            or bool(school_sorting)
+            or enrollment_started
+        )
     origin_prompt_rules = build_origin_prompt_rules(
         player_state.state,
         sorting_completed=sorting_completed,
@@ -530,6 +601,10 @@ memory.importance 必须是 1 到 10 之间的整数，禁止返回 major、mino
 actors、keywords、facts、open_threads、resolved_threads、related_data；没有内容的列表和对象使用 [] 或 {}。
 如果现有摘要不足以确认旧事件，先返回 memory_request；每个回合最多请求一次查阅。"""
     is_modern = game_session.era_id == "modern"
+    is_historical = game_session.era_id in {"dumbledore_era", "parent_generation"}
+    is_dumbledore_endgame = game_session.era_id == "dumbledore_era" and str(
+        current_context.get("activity") or ""
+    ) in {"godrics_hollow_1899_summer", "godrics_hollow_1899_fall"}
     grade_rules = MODERN_GRADE_RULES if is_modern else GRADE_AND_COURSE_RULES
     course_rules = "" if is_modern else f"""课程状态是程序权威。课程目录、active_courses、elective_courses、newt_courses、
 course_selection 和 course_history 只能由程序与玩家课程 API 修改。
@@ -546,7 +621,7 @@ course_selection 和 course_history 只能由程序与玩家课程 API 修改。
 
 {course_rules}
 
-{PATRONUS_RULES}
+   {PATRONUS_LEARNED_RULES if patronus_learned else PATRONUS_RULES}
 
 {REPUTATION_RULES}
 
@@ -557,6 +632,12 @@ course_selection 和 course_history 只能由程序与玩家课程 API 修改。
     system = f"{system}\n\n{MAINLINE_CONTEXT_RULES}"
     if game_session.era_id == "modern":
         system = f"{system}\n\n{MODERN_GENERATION_RULES}"
+    elif is_historical:
+        system = f"{system}\n\n{HISTORICAL_GENERATION_RULES}"
+        if game_session.era_id == "parent_generation":
+            system = f"{system}\n\n{PARENT_GENERATION_RULES}"
+        if is_dumbledore_endgame:
+            system = f"{system}\n\n{DUMBLEDORE_ENDGAME_RULES}"
     system = f"{system}\n\n{CHOICE_SELECTION_RULES}"
     system = f"{system}\n\n{NARRATIVE_STYLE_RULES}"
     system = f"{system}\n\n{fate_rules}"
@@ -583,6 +664,9 @@ course_selection 和 course_history 只能由程序与玩家课程 API 修改。
             "platform_nine_three_quarters",
             "sorting_ceremony",
             "owl_letter_arrival",
+            "godrics_hollow",
+            "godrics_hollow_1899_summer",
+            "godrics_hollow_1899_fall",
         }
     ):
         system = f"{system}\n\n{STARTING_POINT_RULES}"

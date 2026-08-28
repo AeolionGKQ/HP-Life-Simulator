@@ -1,5 +1,6 @@
 from datetime import date
 
+import pytest
 from sqlalchemy import select
 
 from backend.app.content.courses import (
@@ -78,6 +79,41 @@ def _enrolled_state() -> dict:
         },
         "identity": {},
     }
+
+
+def test_parent_generation_auto_graduates_year_seven_after_1978() -> None:
+    state = _enrolled_state()
+    state["school"].update(
+        {
+            "grade": "year_7",
+            "school_year": "1977-1978",
+            "grade_started_year": 1977,
+            "departure_reason": None,
+        }
+    )
+    next_state, changes = apply_turn_rules(
+        state,
+        [],
+        _response("1978-07-01", grade="year_7"),
+        era_id="parent_generation",
+    )
+    assert next_state["school"]["grade"] == "left_school"
+    assert next_state["school"]["departure_reason"] == "graduated_after_newts"
+    assert next_state["school"]["active_courses"] == []
+    assert changes["school_grade"]["reason"] == "graduated_after_newts"
+
+
+def test_parent_generation_does_not_overwrite_existing_non_graduation_departure() -> None:
+    state = _enrolled_state()
+    state["school"].update({"grade": "left_school", "departure_reason": "expelled"})
+    next_state, _ = apply_turn_rules(
+        state,
+        [],
+        _response("1978-07-01", grade="left_school"),
+        era_id="parent_generation",
+    )
+    assert next_state["school"]["grade"] == "left_school"
+    assert next_state["school"]["departure_reason"] == "expelled"
 
 
 def test_enrollment_creates_first_year_courses_and_zero_level_skills() -> None:
@@ -238,6 +274,60 @@ def test_left_school_legacy_courses_do_not_progress_in_june() -> None:
     assert next_state["school"]["active_courses"] == []
     assert next_state["skills"]["charms"]["level"] == 4
     assert "course_skills" not in changes
+
+
+@pytest.mark.parametrize(
+    "era_id",
+    ["dumbledore_era", "parent_generation", "second_generation"],
+)
+def test_left_school_course_view_keeps_the_departure_grade(era_id: str) -> None:
+    state = _enrolled_state()
+    state["school"]["grade"] = "left_school"
+    state["school"]["active_courses"] = []
+
+    game_session = GameSession(
+        id="left-school-course-view",
+        name="离校课程面板测试",
+        era_id=era_id,
+        state_version=3,
+    )
+    player_state = PlayerState(
+        session_id=game_session.id,
+        state=state,
+    )
+
+    courses = get_courses_view(game_session, player_state)
+
+    assert courses.grade == "left_school"
+    assert courses.active_courses == []
+
+
+def test_course_view_accepts_legacy_short_graduation_history() -> None:
+    state = _enrolled_state()
+    state["school"]["grade"] = "left_school"
+    state["school"]["active_courses"] = []
+    state["school"]["course_history"] = [{
+        "year": 1899,
+        "grade": "year_7",
+        "note": "早期存档的简略毕业记录",
+    }]
+
+    game_session = GameSession(
+        id="legacy-endgame-course-view",
+        name="旧终局存档课程面板测试",
+        era_id="dumbledore_era",
+        state_version=3,
+    )
+    player_state = PlayerState(
+        session_id=game_session.id,
+        state=state,
+    )
+
+    courses = get_courses_view(game_session, player_state)
+
+    assert courses.grade == "left_school"
+    assert courses.course_history[0].school_year == "1898-1899"
+    assert courses.course_history[0].grade == "year_7"
 
 
 def test_september_promotion_is_idempotent_and_opens_elective_selection() -> None:

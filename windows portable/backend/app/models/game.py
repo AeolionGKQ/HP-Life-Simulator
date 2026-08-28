@@ -277,3 +277,4 @@ class StoryArcGenerationJob(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
     )
+

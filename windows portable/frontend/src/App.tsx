@@ -943,16 +943,14 @@ function buildSaveGroups(sessions: GameSession[]) {
   const groups = new Map<string, { id: string; title: string; sessions: GameSession[] }>();
 
   for (const session of sessions) {
-    const groupId = session.era_id === "modern"
-      ? "modern"
-      : session.era_id === "second_generation"
-        ? "second_generation"
-        : "other";
-    const title = groupId === "modern"
-      ? "现代存档"
-      : groupId === "second_generation"
-        ? "子世代存档"
-        : "其他世代存档";
+    const titles: Record<string, string> = {
+      dumbledore_era: "邓布利多时代存档",
+      parent_generation: "亲世代存档",
+      second_generation: "子世代存档",
+      modern: "现代存档",
+    };
+    const groupId = titles[session.era_id] ? session.era_id : "other";
+    const title = titles[groupId] ?? "其他世代存档";
     const group = groups.get(groupId) ?? { id: groupId, title, sessions: [] };
     group.sessions.push(session);
     groups.set(groupId, group);
@@ -1042,6 +1040,9 @@ const STARTING_POINT_LABELS: Record<string, string> = {
   diagon_alley: "第一次踏入对角巷",
   platform_nine_three_quarters: "九又四分之三站台",
   sorting_ceremony: "分院时",
+  godrics_hollow: "戈德里克山谷",
+  godrics_hollow_1899_summer: "1899年夏·阿利安娜死亡之前",
+  godrics_hollow_1899_fall: "1899年夏·阿利安娜死亡之时",
 };
 
 const ORIGIN_LABELS: Record<string, string> = {
