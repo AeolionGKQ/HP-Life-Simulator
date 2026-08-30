@@ -330,13 +330,22 @@ export function GameView({
   async function compressAllStoryArcs() {
     setCompressingStoryArcs(true);
     setStoryArcCompressError("");
+    let compressed = false;
     try {
       await api.compressStoryArcs(sessionId);
-      setStoryArcs(await api.storyArcs(sessionId));
+      compressed = true;
     } catch (reason) {
-      setStoryArcCompressError(reason instanceof Error ? reason.message : "故事弧压缩失败");
+      const detail = reason instanceof Error ? reason.message.trim() : "";
+      setStoryArcCompressError(detail || "故事弧压缩失败，请稍后重试");
     } finally {
       setCompressingStoryArcs(false);
+    }
+    if (!compressed) return;
+    try {
+      setStoryArcs(await api.storyArcs(sessionId));
+    } catch {
+      // 压缩已经提交成功，只是列表没刷新，不能报成压缩失败。
+      setStoryArcCompressError("故事弧已压缩成功，但列表刷新失败，请重新打开本面板查看。");
     }
   }
 

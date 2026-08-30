@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from backend.app.core.config import LLMSettings, get_settings, update_llm_config
+from backend.app.core.config import (
+    LLMSettings,
+    get_settings,
+    update_llm_config,
+)
 from backend.app.content.eras import list_eras
 from backend.app.db.session import get_db, get_engine
 from backend.app.models import GameSession
@@ -14,6 +20,7 @@ from backend.app.schemas.common import (
     HealthResponse,
     LLMConfigUpdate,
     LLMConfigStatus,
+    LLMThinkingUpdate,
     LLMConnectionResult,
 )
 from backend.app.schemas.sessions import (
@@ -72,6 +79,7 @@ from backend.app.services.story_arcs import (
     story_arc_status,
 )
 from backend.app.services.courses import get_courses_view, select_courses
+from backend.app.services.llm_config import apply_thinking_setting
 from backend.app.services.attributes import (
     AttributeInitializationError,
     initialize_attributes,
@@ -110,6 +118,7 @@ def llm_config_status() -> LLMConfigStatus:
         base_url=settings.llm.base_url,
         model=settings.llm.model,
         api_key_present=bool(settings.llm.api_key.get_secret_value()),
+        enable_thinking=settings.llm.enable_thinking,
     )
 
 
@@ -127,9 +136,11 @@ async def test_llm_connection(
             timeout_seconds=settings.llm.timeout_seconds,
             temperature=settings.llm.temperature,
             supports_json_schema=settings.llm.supports_json_schema,
+            enable_thinking=settings.llm.enable_thinking,
+            thinking_disable_fields=settings.llm.thinking_disable_fields,
             stream=False,
         )
-    provider = OpenAICompatibleProvider(llm_settings)
+    provider = OpenAICompatibleProvider(llm_settings, persist_thinking_fields=False)
     success, message, latency_ms = await provider.test_connection()
     return LLMConnectionResult(
         success=success,
@@ -154,6 +165,25 @@ def update_llm_config_route(payload: LLMConfigUpdate) -> LLMConfigStatus:
         base_url=settings.llm.base_url,
         model=settings.llm.model,
         api_key_present=True,
+        enable_thinking=settings.llm.enable_thinking,
+    )
+
+
+@router.put("/config/llm/thinking", response_model=LLMConfigStatus)
+async def update_llm_thinking_route(payload: LLMThinkingUpdate) -> LLMConfigStatus:
+    try:
+        settings, notice = await apply_thinking_setting(
+            enable_thinking=payload.enable_thinking,
+        )
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail="无法写入本地配置文件") from exc
+    return LLMConfigStatus(
+        configured=bool(settings.llm.api_key.get_secret_value()),
+        base_url=settings.llm.base_url,
+        model=settings.llm.model,
+        api_key_present=bool(settings.llm.api_key.get_secret_value()),
+        enable_thinking=settings.llm.enable_thinking,
+        thinking_notice=notice,
     )
 
 
@@ -487,8 +517,22 @@ async def compress_session_story_arcs(
         return StoryArcRead.model_validate(merged_read)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except asyncio.TimeoutError as exc:
+        # asyncio.TimeoutError 的 str() 是空字符串，必须自己给出完整文案。
+        raise HTTPException(
+            status_code=504,
+            detail="故事弧压缩超时，模型长时间没有返回结果，请稍后重试",
+        ) from exc
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"故事弧压缩失败：{exc}") from exc
+        detail = str(exc).strip()
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                f"故事弧压缩失败，请稍后重试：{detail}"
+                if detail
+                else "故事弧压缩失败，请稍后重试"
+            ),
+        ) from exc
 
 
 @router.get("/sessions/{session_id}/setup", response_model=SetupView)

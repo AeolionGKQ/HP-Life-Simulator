@@ -90,6 +90,16 @@ def _prepare_config(files_dir: str) -> Path:
             existing = tomllib.load(config_file)
     llm = existing.get("llm", {})
     database_path = (data_dir / "game.db").resolve().as_posix()
+    # 关闭思考的可用字段是探测出来的结果，重建配置时同样要沿用，
+    # 否则每次启动都会把已被服务拒绝的字段重新发出去。
+    thinking_fields = llm.get("thinking_disable_fields")
+    thinking_fields_line = (
+        "thinking_disable_fields = ["
+        + ", ".join(_toml_string(str(name)) for name in thinking_fields)
+        + "]\n"
+        if isinstance(thinking_fields, list)
+        else ""
+    )
     config_path.write_text(
         "[app]\n"
         f"name = {_toml_string(str(existing.get('app', {}).get('name', '霍格沃兹人生模拟器')))}\n"
@@ -108,6 +118,9 @@ def _prepare_config(files_dir: str) -> Path:
         # response_format on the simple connectivity probe.
         "supports_json_schema = false\n"
         "supports_concurrent_requests = true\n"
+        # 模型思考开关由玩家在顶部模型服务栏切换，重建配置时必须沿用旧值。
+        f"enable_thinking = {str(bool(llm.get('enable_thinking', True))).lower()}\n"
+        f"{thinking_fields_line}"
         f"stream = false\n\n"
         "[game]\n"
         "era_id = \"second_generation\"\n"
@@ -150,6 +163,7 @@ def _load_runtime_unlocked(files_dir: str) -> dict[str, Any]:
         initialize_attributes,
     )
     from backend.app.services.courses import get_courses_view, select_courses
+    from backend.app.services.llm_config import apply_thinking_setting
     from backend.app.services.sessions import (
         create_session,
         delete_session,
@@ -180,7 +194,7 @@ def _load_runtime_unlocked(files_dir: str) -> dict[str, Any]:
         retry_story_arc_job,
         story_arc_status,
     )
-    from backend.app.schemas.common import LLMConfigUpdate
+    from backend.app.schemas.common import LLMConfigUpdate, LLMThinkingUpdate
     from backend.app.schemas.game import (
         ActionRequest,
         AttributeInitializationRequest,
@@ -199,6 +213,7 @@ def _load_runtime_unlocked(files_dir: str) -> dict[str, Any]:
         "db": backend_db,
         "list_eras": list_eras,
         "provider": OpenAICompatibleProvider,
+        "apply_thinking_setting": apply_thinking_setting,
         "AttributeInitializationError": AttributeInitializationError,
         "initialize_attributes": initialize_attributes,
         "get_courses_view": get_courses_view,
@@ -228,6 +243,7 @@ def _load_runtime_unlocked(files_dir: str) -> dict[str, Any]:
         "retry_story_arc_job": retry_story_arc_job,
         "story_arc_status": story_arc_status,
         "LLMConfigUpdate": LLMConfigUpdate,
+        "LLMThinkingUpdate": LLMThinkingUpdate,
         "ActionRequest": ActionRequest,
         "AttributeInitializationRequest": AttributeInitializationRequest,
         "CourseSelectionRequest": CourseSelectionRequest,
@@ -310,6 +326,26 @@ def request(path: str, method: str, body: str, files_dir: str) -> str:
         )
     if path == "/api/content/eras":
         return _dump(runtime["list_eras"]())
+    if path == "/api/config/llm/thinking":
+        if method != "PUT":
+            raise ValueError(f"移动端暂不支持 {method} {path}")
+        update = runtime["LLMThinkingUpdate"].model_validate(payload)
+        next_settings, thinking_notice = _run_async(
+            runtime["apply_thinking_setting"],
+            enable_thinking=update.enable_thinking,
+        )
+        return _dump(
+            {
+                "configured": bool(next_settings.llm.api_key.get_secret_value()),
+                "base_url": next_settings.llm.base_url,
+                "model": next_settings.llm.model,
+                "api_key_present": bool(
+                    next_settings.llm.api_key.get_secret_value()
+                ),
+                "enable_thinking": next_settings.llm.enable_thinking,
+                "thinking_notice": thinking_notice,
+            }
+        )
     if path == "/api/config/llm":
         if method == "PUT":
             update = runtime["LLMConfigUpdate"].model_validate(payload)
@@ -324,6 +360,7 @@ def request(path: str, method: str, body: str, files_dir: str) -> str:
                     "base_url": next_settings.llm.base_url,
                     "model": next_settings.llm.model,
                     "api_key_present": True,
+                    "enable_thinking": next_settings.llm.enable_thinking,
                 }
             )
         return _dump(
@@ -332,6 +369,7 @@ def request(path: str, method: str, body: str, files_dir: str) -> str:
                 "base_url": settings.llm.base_url,
                 "model": settings.llm.model,
                 "api_key_present": bool(settings.llm.api_key.get_secret_value()),
+                "enable_thinking": settings.llm.enable_thinking,
             }
         )
     if path == "/api/llm/test":
@@ -346,9 +384,16 @@ def request(path: str, method: str, body: str, files_dir: str) -> str:
                 temperature=settings.llm.temperature,
                 supports_json_schema=settings.llm.supports_json_schema,
                 supports_concurrent_requests=settings.llm.supports_concurrent_requests,
+                enable_thinking=settings.llm.enable_thinking,
+                thinking_disable_fields=settings.llm.thinking_disable_fields,
                 stream=False,
             )
-        result = _run_async(runtime["provider"](llm_settings).test_connection)
+        result = _run_async(
+            runtime["provider"](
+                llm_settings,
+                persist_thinking_fields=False,
+            ).test_connection
+        )
         success, message, latency_ms = result
         return _dump(
             {
@@ -497,11 +542,27 @@ def request(path: str, method: str, body: str, files_dir: str) -> str:
                 )
             )
         if suffix == "story-arcs/compress" and method == "POST":
-            merged = _run_async(
-                runtime["compress_story_arcs"],
-                db,
-                session_id,
-            )
+            try:
+                merged = _run_async(
+                    runtime["compress_story_arcs"],
+                    db,
+                    session_id,
+                )
+            except ValueError:
+                # 前置条件不满足（弧太少、正在压缩等），原文已经是给玩家看的。
+                raise
+            except asyncio.TimeoutError as exc:
+                # asyncio.TimeoutError 的 str() 是空字符串，必须自己给出完整文案。
+                raise ValueError(
+                    "故事弧压缩超时，模型长时间没有返回结果，请稍后重试"
+                ) from exc
+            except Exception as exc:
+                detail = str(exc).strip()
+                raise ValueError(
+                    f"故事弧压缩失败，请稍后重试：{detail}"
+                    if detail
+                    else "故事弧压缩失败，请稍后重试"
+                ) from exc
             merged_read = next(
                 item
                 for item in runtime["list_story_arc_reads"](db, session_id)

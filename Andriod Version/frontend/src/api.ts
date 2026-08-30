@@ -12,6 +12,8 @@ export interface LLMConfigStatus {
   base_url: string;
   model: string;
   api_key_present: boolean;
+  enable_thinking: boolean;
+  thinking_notice?: string;
 }
 
 export interface LLMConnectionResult {
@@ -314,10 +316,16 @@ export interface StoryArcStatus {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
-    ...init,
-  });
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      headers: { "Content-Type": "application/json" },
+      ...init,
+    });
+  } catch {
+    // fetch 自身抛出时只有浏览器的英文文案，换成玩家能看懂的提示。
+    throw new Error("无法连接到本地服务，请确认后端正在运行后重试");
+  }
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     const detail = body.detail;
@@ -379,6 +387,15 @@ export const api = {
           method: "PUT",
           body: JSON.stringify(payload),
         }),
+  updateLlmThinking: (enableThinking: boolean) => {
+    const body = JSON.stringify({ enable_thinking: enableThinking });
+    return isAndroidNative()
+      ? requestPython<LLMConfigStatus>("/api/config/llm/thinking", "PUT", body)
+      : request<LLMConfigStatus>("/api/config/llm/thinking", {
+          method: "PUT",
+          body,
+        });
+  },
   testLlm: (payload?: { base_url: string; api_key: string; model: string }) =>
     isAndroidNative()
       ? requestPython<LLMConnectionResult>(

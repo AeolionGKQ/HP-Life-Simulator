@@ -18,6 +18,7 @@ timeout_seconds = 300
 temperature = 0.8
 supports_json_schema = false
 supports_concurrent_requests = true
+enable_thinking = true
 stream = false
 
 [game]

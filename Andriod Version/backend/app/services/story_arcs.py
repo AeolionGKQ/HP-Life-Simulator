@@ -508,6 +508,19 @@ def _response_content(raw_response: dict[str, Any]) -> Any:
     return content
 
 
+def _story_arc_provider(settings: Settings) -> OpenAICompatibleProvider:
+    """故事弧总结与压缩始终保留模型思考，不受顶部的模型思考开关影响。
+
+    这两类任务要在几十个回合里做长程因果归纳，关掉思考会明显降低质量，
+    而它们都在后台异步执行，玩家不会因为多花的耗时而等待。
+    """
+    return OpenAICompatibleProvider(
+        settings.llm.model_copy(
+            update={"enable_thinking": True, "thinking_disable_fields": None}
+        )
+    )
+
+
 async def _request_story_arc(
     provider: OpenAICompatibleProvider,
     messages: list[dict[str, str]],
@@ -573,7 +586,7 @@ async def compress_story_arcs(db: Session, session_id: str) -> StoryArc:
         settings = get_settings()
         response = await asyncio.wait_for(
             _request_story_arc(
-                OpenAICompatibleProvider(settings.llm),
+                _story_arc_provider(settings),
                 build_story_arc_compression_messages(
                     arcs,
                     source_start=source_start,
@@ -727,7 +740,7 @@ async def _run_story_arc_job(job_id: str) -> None:
         ]
         response = await asyncio.wait_for(
             _request_story_arc(
-                OpenAICompatibleProvider(settings.llm),
+                _story_arc_provider(settings),
                 build_story_arc_messages(
                     source,
                     source_start=job.source_turn_start,

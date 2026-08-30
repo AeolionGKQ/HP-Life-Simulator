@@ -83,6 +83,9 @@ export function App() {
   });
   const [configMessage, setConfigMessage] = useState("");
   const [configSaving, setConfigSaving] = useState(false);
+  const [thinkingSaving, setThinkingSaving] = useState(false);
+  const [thinkingPending, setThinkingPending] = useState<boolean | null>(null);
+  const [thinkingNotice, setThinkingNotice] = useState("");
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [saveManaging, setSaveManaging] = useState(false);
@@ -346,6 +349,28 @@ export function App() {
     }
   }
 
+  async function toggleThinking(nextEnabled: boolean) {
+    if (thinkingSaving) return;
+    setThinkingSaving(true);
+    setThinkingPending(nextEnabled);
+    setError("");
+    setThinkingNotice(
+      nextEnabled ? "正在开启模型思考…" : "正在确认模型服务是否接受关闭思考…",
+    );
+    try {
+      const next = await api.updateLlmThinking(nextEnabled);
+      setLlm(next);
+      setThinkingNotice(next.thinking_notice ?? "");
+    } catch (reason) {
+      setThinkingNotice("");
+      setError(reason instanceof Error ? reason.message : "模型思考开关切换失败");
+    } finally {
+      // 探测结果落地后才解锁，避免玩家连续拨动导致多轮探测互相覆盖。
+      setThinkingPending(null);
+      setThinkingSaving(false);
+    }
+  }
+
   async function testConfig() {
     if (
       !configDraft.base_url.trim() ||
@@ -576,6 +601,23 @@ export function App() {
           <span className="service-label"><Sparkle aria-hidden="true" />模型服务</span>
           <strong>{llm?.model ?? "等待水晶球回应"}</strong>
           <small>{llm?.api_key_present ? "叙事水晶已与远方回响相连" : "叙事水晶尚未建立连接"}</small>
+          <label className="thinking-switch" aria-busy={thinkingSaving}>
+            <input
+              type="checkbox"
+              checked={thinkingPending ?? llm?.enable_thinking ?? true}
+              disabled={!llm || thinkingSaving}
+              onChange={(event) => void toggleThinking(event.target.checked)}
+            />
+            <span className="thinking-track" aria-hidden="true" />
+            <span className="thinking-name">模型思考</span>
+            <small>{(llm?.enable_thinking ?? true) ? "所有生成任务均保留思考" : "剧情生成已关闭思考，故事弧总结仍保留"}</small>
+          </label>
+          {(thinkingSaving || thinkingNotice) && (
+            <p className="thinking-notice" aria-live="polite">
+              {thinkingSaving && <span className="thinking-spinner" aria-hidden="true" />}
+              {thinkingNotice}
+            </p>
+          )}
           <button ref={configTriggerRef} className="config-button" onClick={openConfig}><GearSix aria-hidden="true" />修改 / 测试</button>
         </div>
       </section>
@@ -707,91 +749,107 @@ export function App() {
                 </div>
               )}
               <div className="setup-input-row">
-                {setup.current_step > 1 && (
-                  <button
-                    className="secondary-button"
-                    disabled={setupLoading !== null}
-                    onClick={() => void navigateSetupBack()}
-                  >
-                    上一步
-                  </button>
-                )}
                 {setup.current.selection_mode !== "confirm" ? (
                   <>
                     {setup.current_step !== 1 && setup.current_step !== 14 && setup.current_step !== 15 && (
-                      setup.current_step === 4 ? (
-                        <input
-                          aria-label="生日"
-                          autoComplete="bday"
-                          type="date"
-                          value={setupAnswer}
-                          onChange={(event) => setSetupAnswer(event.target.value)}
-                        />
-                      ) : (
-                        <textarea
-                          aria-label={setup.current.title}
-                          value={setupAnswer}
-                          onChange={(event) => setSetupAnswer(event.target.value)}
-                          placeholder={
-                            setup.current.selection_mode === "append"
-                              ? "点击预设会追加到这里，也可以继续输入，用逗号分隔"
-                              : setup.current_step === 2
-                                ? "输入角色姓名"
-                                : setup.current_step === 16
-                                  ? "选择上方预设，或写下你的独特守护神"
-                                  : setup.current_step === 17
-                                    ? "写下任何希望魔法世界记住的角色设定（可留空）"
-                                : "选择上方预设，或输入自定义设定"
-                          }
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
-                              void submitSetupAnswer();
+                      <div className="setup-answer-field">
+                        {setup.current_step === 4 ? (
+                          <input
+                            aria-label="生日"
+                            autoComplete="bday"
+                            type="date"
+                            value={setupAnswer}
+                            onChange={(event) => setSetupAnswer(event.target.value)}
+                          />
+                        ) : (
+                          <textarea
+                            aria-label={setup.current.title}
+                            value={setupAnswer}
+                            onChange={(event) => setSetupAnswer(event.target.value)}
+                            placeholder={
+                              setup.current.selection_mode === "append"
+                                ? "点击预设会追加到这里，也可以继续输入，用逗号分隔"
+                                : setup.current_step === 2
+                                  ? "输入角色姓名"
+                                  : setup.current_step === 16
+                                    ? "选择上方预设，或写下你的独特守护神"
+                                    : setup.current_step === 17
+                                      ? "写下任何希望魔法世界记住的角色设定（可留空）"
+                                  : "选择上方预设，或输入自定义设定"
                             }
-                          }}
-                        />
-                      )
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                                void submitSetupAnswer();
+                              }
+                            }}
+                          />
+                        )}
+                      </div>
                     )}
-                    <button
-                      className={
-                        setup.current_step === 1
-                          ? "primary-button setup-era-next"
-                          : setup.current_step === 15
-                            ? "primary-button setup-single-next"
-                            : "primary-button"
-                      }
-                      disabled={
-                        setupLoading !== null ||
-                        (
-                          !setupAnswer.trim()
-                          && setup.current_step !== 13
-                          && setup.current_step !== 17
-                        )
-                      }
-                      onClick={() => void submitSetupAnswer()}
-                    >
-                      {setupLoading === "answer"
-                        ? "保存中…"
-                        : setup.current_step === 1
-                          ? "以所选世代继续"
-                          : setup.current_step === 13 && !setupAnswer.trim()
-                            ? "不选择预设好友，继续"
-                            : setup.current_step === 17 && !setupAnswer.trim()
-                              ? "不再补充，继续"
-                            : "下一步"}
-                    </button>
+                    {/* 安卓端把输入框放在上方，上一步 / 下一步纵向排在下方，避免按钮把输入框夹在中间。 */}
+                    <div className="setup-navigation-actions">
+                      {setup.current_step > 1 && (
+                        <button
+                          className="secondary-button"
+                          disabled={setupLoading !== null}
+                          onClick={() => void navigateSetupBack()}
+                        >
+                          上一步
+                        </button>
+                      )}
+                      <button
+                        className={
+                          setup.current_step === 1
+                            ? "primary-button setup-era-next"
+                            : setup.current_step === 15
+                              ? "primary-button setup-single-next"
+                              : "primary-button"
+                        }
+                        disabled={
+                          setupLoading !== null ||
+                          (
+                            !setupAnswer.trim()
+                            && setup.current_step !== 13
+                            && setup.current_step !== 17
+                          )
+                        }
+                        onClick={() => void submitSetupAnswer()}
+                      >
+                        {setupLoading === "answer"
+                          ? "保存中…"
+                          : setup.current_step === 1
+                            ? "以所选世代继续"
+                            : setup.current_step === 13 && !setupAnswer.trim()
+                              ? "不选择预设好友，继续"
+                              : setup.current_step === 17 && !setupAnswer.trim()
+                                ? "不再补充，继续"
+                              : "下一步"}
+                      </button>
+                    </div>
                   </>
                 ) : (
-                  <button
-                    className="primary-button"
-                    disabled={setupLoading !== null}
-                    onClick={() => void confirmSetup()}
-                  >
-                    {setupLoading === "confirm"
-                      ? "确认中…"
-                      : setupLoading === "navigate"
-                        ? "返回中…"
-                        : "确认角色并开始"}
-                  </button>
+                  <div className="setup-navigation-actions">
+                    {setup.current_step > 1 && (
+                      <button
+                        className="secondary-button"
+                        disabled={setupLoading !== null}
+                        onClick={() => void navigateSetupBack()}
+                      >
+                        上一步
+                      </button>
+                    )}
+                    <button
+                      className="primary-button"
+                      disabled={setupLoading !== null}
+                      onClick={() => void confirmSetup()}
+                    >
+                      {setupLoading === "confirm"
+                        ? "确认中…"
+                        : setupLoading === "navigate"
+                          ? "返回中…"
+                          : "确认角色并开始"}
+                    </button>
+                  </div>
                 )}
               </div>
               <p className="setup-hint">

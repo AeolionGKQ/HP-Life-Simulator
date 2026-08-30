@@ -1,8 +1,8 @@
-# 安卓端交接文档（v3.6）
+# 安卓端交接文档（v3.6.1）
 
 > 本文只覆盖安卓端。PC 源码端与 Windows 便携版另有单独总结，本文不再重复。
 >
-> 对应版本：`versionName 3.6` / `versionCode 17`，最后一次实机验证时间 2026-08-28。
+> 当前构建版本：`versionName 3.6.1` / `versionCode 18`；测试机已移除，本版本仅完成本地构建与静态校验。
 
 ## 1. 项目定位
 
@@ -105,13 +105,13 @@ D:\HP Simulator\Andriod Version\frontend\android\app\build\outputs\apk\debug\app
 
 ### 4.2 版本号需要同时改的位置
 
-以 v3.6 为例：
+以 v3.6.1 为例：
 
-- `frontend/android/app/build.gradle`：`versionCode 17`、`versionName "3.6"`
-- `frontend/package.json`：`"version": "3.6.0"`
-- `frontend/package-lock.json`：顶层两处 `"version": "3.6.0"`
-- `pyproject.toml`：`version = "3.6.0"`
-- `backend/app/main.py`：`version="3.6.0"`
+- `frontend/android/app/build.gradle`：`versionCode 18`、`versionName "3.6.1"`
+- `frontend/package.json`：`"version": "3.6.1"`
+- `frontend/package-lock.json`：顶层两处 `"version": "3.6.1"`
+- `pyproject.toml`：`version = "3.6.1"`
+- `backend/app/main.py`：`version="3.6.1"`
 
 `versionCode` 必须严格递增，否则覆盖安装会被系统拒绝。
 
@@ -178,6 +178,18 @@ certutil.exe -hashfile $apk SHA256
 - 序列号 `912618110264`，型号 `NX809J`，Android 16
 - 安装后实机确认：`versionCode=17`、`versionName=3.6`、进程正常启动、`files/game.db`（约 42 MB）仍在，说明存档未被清除
 - 备用设备：`3B1F5CE5MS12LURU` / `PJZ110`
+
+### 6.3 v3.6.1 构建结果
+
+- 包名：`com.hpsimulator.app`
+- 版本：`versionName 3.6.1` / `versionCode 18`
+- ABI：`arm64-v8a`
+- ZIP 对齐：通过
+- 签名校验：通过
+- SHA-256：`b58267592a1aa906dea54b6215da092942bef0727e995be3d484c37b16958c46`
+- 体积：`22279958` 字节
+- 本次重打包内容：故事弧生成与压缩不再受模型思考开关影响（`_story_arc_provider()` 固定按开启思考发起请求）、手动压缩失败保护、恢复安卓专属的角色创建布局（输入框在上、上一步/下一步在下）
+- 本版本未安装到设备（测试机已移除）
 
 ## 7. 测试
 

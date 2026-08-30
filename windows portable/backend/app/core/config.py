@@ -42,6 +42,9 @@ class LLMSettings(BaseModel):
     temperature: float = Field(default=0.8, ge=0, le=2)
     supports_json_schema: bool = False
     supports_concurrent_requests: bool = True
+    enable_thinking: bool = True
+    # 为空表示使用全部已知的关闭思考字段；被服务拒绝后会收敛成可用子集。
+    thinking_disable_fields: list[str] | None = None
     stream: bool = False
 
     @field_validator("base_url")
@@ -129,6 +132,26 @@ def update_llm_config(
     raw["llm"]["base_url"] = base_url.rstrip("/")
     raw["llm"]["api_key"] = api_key
     raw["llm"]["model"] = model
+    with current.config_path.open("wb") as config_file:
+        tomli_w.dump(raw, config_file)
+    get_settings.cache_clear()
+    return get_settings()
+
+
+def update_llm_thinking(
+    *,
+    enable_thinking: bool,
+    thinking_disable_fields: list[str] | None = None,
+) -> Settings:
+    """Toggle model thinking for every generation task and refresh the cache."""
+    current = get_settings()
+    raw = _load_toml(current.config_path)
+    raw.setdefault("llm", {})
+    raw["llm"]["enable_thinking"] = enable_thinking
+    if thinking_disable_fields is None:
+        raw["llm"].pop("thinking_disable_fields", None)
+    else:
+        raw["llm"]["thinking_disable_fields"] = list(thinking_disable_fields)
     with current.config_path.open("wb") as config_file:
         tomli_w.dump(raw, config_file)
     get_settings.cache_clear()

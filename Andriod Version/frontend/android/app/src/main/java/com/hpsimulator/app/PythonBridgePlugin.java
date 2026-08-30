@@ -103,14 +103,40 @@ public class PythonBridgePlugin extends Plugin {
             call.resolve(result);
         } catch (Exception exception) {
             Log.e("PythonBridge", "Python request failed", exception);
-            String detail = exception.getMessage();
-            call.reject(
-                detail == null || detail.isEmpty()
-                    ? "本地 Python 请求失败"
-                    : "本地 Python 请求失败：" + detail,
-                exception
-            );
+            call.reject(describePythonError(exception), exception);
         }
+    }
+
+    /**
+     * Chaquopy 会把异常类型和整段 traceback 一起塞进 message，直接显示给玩家
+     * 就是 "com.chaquo.python.PyException: RuntimeError: ..." 加一堆调用栈。
+     * 这里只保留最后一行里的中文原因，完整堆栈仍然写进 Log。
+     */
+    private String describePythonError(Exception exception) {
+        String detail = exception.getMessage();
+        if (detail == null) {
+            return "本地服务处理失败，请稍后重试";
+        }
+        String message = detail.trim();
+        String[] lines = message.split("\\r?\\n");
+        for (int index = lines.length - 1; index >= 0; index--) {
+            if (!lines[index].trim().isEmpty()) {
+                message = lines[index].trim();
+                break;
+            }
+        }
+        while (true) {
+            int separator = message.indexOf(": ");
+            if (separator < 0) {
+                break;
+            }
+            String head = message.substring(0, separator);
+            if (!head.matches("[\\w.$]+(Error|Exception)")) {
+                break;
+            }
+            message = message.substring(separator + 2).trim();
+        }
+        return message.isEmpty() ? "本地服务处理失败，请稍后重试" : message;
     }
 
     @PluginMethod

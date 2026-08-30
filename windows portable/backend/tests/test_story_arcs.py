@@ -1,10 +1,14 @@
 import asyncio
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+import backend.app.api.routes as routes_module
+from backend.app.main import create_app
 from backend.app.db.base import Base
+from backend.app.core.config import get_settings
 from backend.app.models import (
     GameSession,
     JournalEntry,
@@ -314,3 +318,106 @@ def test_manual_compression_rejects_fewer_than_two_arcs() -> None:
 
     with pytest.raises(ValueError, match="至少需要两条"):
         asyncio.run(compress_story_arcs(db, session.id))
+
+
+def test_story_arc_requests_keep_thinking_when_switch_is_off(monkeypatch) -> None:
+    db = _database()
+    session = GameSession(name="测试", era_id="second_generation", state_version=4)
+    db.add(session)
+    db.flush()
+    _add_turns(db, session.id, 1, 4)
+    turns = list(
+        db.query(TurnRecord)
+        .filter(TurnRecord.session_id == session.id)
+        .order_by(TurnRecord.sequence.asc())
+    )
+    for index, (start, end) in enumerate(((1, 2), (3, 4))):
+        db.add(
+            StoryArc(
+                session_id=session.id,
+                scope_key=f"arc-{start:04d}-{end:04d}",
+                status="ready",
+                title=f"阶段 {index + 1}",
+                summary=f"阶段 {index + 1} 的摘要",
+                source_turn_ids=[turn.id for turn in turns[start - 1:end]],
+                covered_turn_start=start,
+                covered_turn_end=end,
+            )
+        )
+    db.commit()
+    base = get_settings()
+    disabled = base.model_copy(
+        update={
+            "llm": base.llm.model_copy(
+                update={
+                    "enable_thinking": False,
+                    "thinking_disable_fields": ["thinking"],
+                }
+            )
+        }
+    )
+    monkeypatch.setattr(story_arc_service, "get_settings", lambda: disabled)
+
+    seen: list[object] = []
+
+    async def fake_request(provider, _messages):
+        seen.append(provider.settings)
+        return StoryArcResponse(
+            response_type="story_arc",
+            title="压缩后的故事",
+            summary="保留两段剧情的关键因果。",
+            causal_chain=["关键因果"],
+            open_threads=[],
+            key_characters=["player"],
+            key_locations=["home"],
+            keywords=["主线"],
+            important_turns=[2, 4],
+        )
+
+    monkeypatch.setattr(story_arc_service, "_request_story_arc", fake_request)
+    asyncio.run(compress_story_arcs(db, session.id))
+
+    assert len(seen) == 1
+    # 玩家关掉了模型思考，故事弧压缩仍然按开启思考请求。
+    assert seen[0].enable_thinking is True
+    assert seen[0].thinking_disable_fields is None
+
+
+def _compress_response(monkeypatch, error: BaseException):
+    async def failing_compress(_db, _session_id):
+        raise error
+
+    monkeypatch.setattr(routes_module, "_require_session", lambda db, session_id: None)
+    monkeypatch.setattr(routes_module, "compress_story_arcs", failing_compress)
+    with TestClient(create_app()) as client:
+        return client.post("/api/sessions/any-session/story-arcs/compress")
+
+
+def test_compress_route_reports_timeout_with_retry_hint(monkeypatch) -> None:
+    response = _compress_response(monkeypatch, asyncio.TimeoutError())
+    assert response.status_code == 504
+    detail = response.json()["detail"]
+    # TimeoutError 的 str() 是空的，提示不能只剩一个冒号。
+    assert "超时" in detail
+    assert "请稍后重试" in detail
+
+
+def test_compress_route_reports_generation_failure_with_retry_hint(monkeypatch) -> None:
+    response = _compress_response(
+        monkeypatch,
+        RuntimeError("故事弧连续两次生成失败：模型服务返回 HTTP 500"),
+    )
+    assert response.status_code == 502
+    detail = response.json()["detail"]
+    assert "请稍后重试" in detail
+    assert "模型服务返回 HTTP 500" in detail
+
+
+def test_compress_route_keeps_precondition_message_without_retry_hint(monkeypatch) -> None:
+    response = _compress_response(
+        monkeypatch,
+        ValueError("至少需要两条已完成的故事弧才能压缩"),
+    )
+    assert response.status_code == 409
+    # 前置条件不满足时重试没有意义，不应该混入"请稍后重试"。
+    assert response.json()["detail"] == "至少需要两条已完成的故事弧才能压缩"

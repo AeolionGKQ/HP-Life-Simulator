@@ -82,6 +82,9 @@ export function App() {
   });
   const [configMessage, setConfigMessage] = useState("");
   const [configSaving, setConfigSaving] = useState(false);
+  const [thinkingSaving, setThinkingSaving] = useState(false);
+  const [thinkingPending, setThinkingPending] = useState<boolean | null>(null);
+  const [thinkingNotice, setThinkingNotice] = useState("");
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [saveManaging, setSaveManaging] = useState(false);
@@ -345,6 +348,28 @@ export function App() {
     }
   }
 
+  async function toggleThinking(nextEnabled: boolean) {
+    if (thinkingSaving) return;
+    setThinkingSaving(true);
+    setThinkingPending(nextEnabled);
+    setError("");
+    setThinkingNotice(
+      nextEnabled ? "正在开启模型思考…" : "正在确认模型服务是否接受关闭思考…",
+    );
+    try {
+      const next = await api.updateLlmThinking(nextEnabled);
+      setLlm(next);
+      setThinkingNotice(next.thinking_notice ?? "");
+    } catch (reason) {
+      setThinkingNotice("");
+      setError(reason instanceof Error ? reason.message : "模型思考开关切换失败");
+    } finally {
+      // 探测结果落地后才解锁，避免玩家连续拨动导致多轮探测互相覆盖。
+      setThinkingPending(null);
+      setThinkingSaving(false);
+    }
+  }
+
   async function testConfig() {
     if (
       !configDraft.base_url.trim() ||
@@ -563,6 +588,23 @@ export function App() {
           <span className="service-label"><Sparkle aria-hidden="true" />模型服务</span>
           <strong>{llm?.model ?? "等待水晶球回应"}</strong>
           <small>{llm?.api_key_present ? "叙事水晶已与远方回响相连" : "叙事水晶尚未建立连接"}</small>
+          <label className="thinking-switch" aria-busy={thinkingSaving}>
+            <input
+              type="checkbox"
+              checked={thinkingPending ?? llm?.enable_thinking ?? true}
+              disabled={!llm || thinkingSaving}
+              onChange={(event) => void toggleThinking(event.target.checked)}
+            />
+            <span className="thinking-track" aria-hidden="true" />
+            <span className="thinking-name">模型思考</span>
+            <small>{(llm?.enable_thinking ?? true) ? "所有生成任务均保留思考" : "剧情生成已关闭思考，故事弧总结仍保留"}</small>
+          </label>
+          {(thinkingSaving || thinkingNotice) && (
+            <p className="thinking-notice" aria-live="polite">
+              {thinkingSaving && <span className="thinking-spinner" aria-hidden="true" />}
+              {thinkingNotice}
+            </p>
+          )}
           <button ref={configTriggerRef} className="config-button" onClick={openConfig}><GearSix aria-hidden="true" />修改 / 测试</button>
         </div>
       </section>

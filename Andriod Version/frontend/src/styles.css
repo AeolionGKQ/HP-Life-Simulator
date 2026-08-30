@@ -198,6 +198,82 @@ h3 { margin-bottom: 5px; font-size: 17px; font-weight: 560; }
   white-space: nowrap;
 }
 
+.thinking-switch {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 3px 9px;
+  margin: 12px 0 4px;
+  cursor: pointer;
+}
+
+/* 输入框保持 44×44 的可点击区域（无障碍最小触控尺寸），视觉由 .thinking-track 呈现。 */
+.thinking-switch input {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 44px;
+  height: 44px;
+  margin: 0;
+  transform: translateY(-50%);
+  opacity: 0;
+  cursor: pointer;
+}
+
+.thinking-track {
+  position: relative;
+  width: 34px;
+  height: 20px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  transition: border-color 0.18s ease, background 0.18s ease;
+}
+
+.thinking-track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: transform 0.18s ease, background 0.18s ease;
+}
+
+.thinking-switch input:checked + .thinking-track { border-color: var(--accent); background: rgba(210, 173, 91, 0.18); }
+.thinking-switch input:checked + .thinking-track::after { transform: translateX(14px); background: var(--accent); }
+.thinking-switch input:focus-visible + .thinking-track { outline: 2px solid var(--accent); outline-offset: 2px; }
+.thinking-switch input:disabled + .thinking-track { opacity: 0.5; }
+.thinking-switch input:disabled { cursor: wait; }
+.thinking-name { color: var(--text); font: 650 12px var(--sans); letter-spacing: 0.02em; }
+.thinking-switch small { grid-column: 2; }
+.thinking-switch[aria-busy="true"] .thinking-track::after { animation: thinking-probe 0.9s ease-in-out infinite alternate; }
+.thinking-notice { margin: 0 0 8px; color: var(--accent); font: 11px/1.6 var(--sans); }
+.thinking-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  vertical-align: -1px;
+  border: 1.5px solid rgba(210, 173, 91, 0.35);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: thinking-spin 0.7s linear infinite;
+}
+
+@keyframes thinking-probe {
+  from { opacity: 0.3; }
+  to { opacity: 1; }
+}
+
+@keyframes thinking-spin {
+  to { transform: rotate(360deg); }
+}
+
+
 .config-button,
 .secondary-button,
 .primary-button,
@@ -689,6 +765,10 @@ textarea:focus { border-color: var(--accent); background: #101610; outline: 0; }
 .story-arc-card h3 { margin: 8px 0 6px; }
 .story-arc-card p { margin: 0; color: var(--text-soft); font: 12px/1.8 var(--sans); }
 .story-arc-card small { display: block; margin-top: 10px; color: var(--muted); font: 10px/1.65 var(--sans); }
+.story-arc-threads { margin-top: 12px; color: var(--muted); }
+.story-arc-threads strong { display: block; color: var(--text-soft); font: 650 11px var(--sans); }
+.story-arc-threads ul { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 4px; }
+.story-arc-threads li { color: var(--muted); font: 11px/1.7 var(--sans); }
 .relationship-row { align-items: center; justify-content: space-between; flex-wrap: wrap; }
 .relationship-row strong,
 .relationship-row small { display: block; }

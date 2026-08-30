@@ -14,12 +14,18 @@ class LLMConfigStatus(BaseModel):
     base_url: str
     model: str
     api_key_present: bool
+    enable_thinking: bool = True
+    thinking_notice: str = ""
 
 
 class LLMConfigUpdate(BaseModel):
     base_url: str = Field(min_length=1, max_length=500)
     api_key: str = Field(min_length=1, max_length=1000)
     model: str = Field(min_length=1, max_length=200)
+
+
+class LLMThinkingUpdate(BaseModel):
+    enable_thinking: bool
 
 
 class LLMConnectionResult(BaseModel):
