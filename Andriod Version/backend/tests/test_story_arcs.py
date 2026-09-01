@@ -21,6 +21,7 @@ from backend.app.services.story_arcs import (
     compress_story_arcs,
     ensure_story_arc_job,
     is_story_arc_blocking,
+    _run_story_arc_job,
     story_arc_mode,
 )
 from backend.app.schemas.game import StoryArcResponse
@@ -144,6 +145,68 @@ def test_empty_journal_uses_first_200_characters_without_model_call() -> None:
         for item in context["pending_turn_summaries"]
     }
     assert summaries[3] == "这是第 3 个节点的剧情正文。"
+
+
+def test_failed_story_arc_releases_nodes_for_next_trigger(monkeypatch) -> None:
+    db = _database()
+    session = GameSession(name="测试", era_id="second_generation", state_version=35)
+    db.add(session)
+    db.flush()
+    session_id = session.id
+    _add_turns(db, session.id, 1, 35)
+    db.commit()
+
+    job = ensure_story_arc_job(db, session_id)
+    assert job is not None
+
+    async def failing_request(_provider, _messages):
+        raise RuntimeError("模型服务暂时不可用")
+
+    monkeypatch.setattr(story_arc_service, "_request_story_arc", failing_request)
+    monkeypatch.setattr(story_arc_service, "get_session_factory", lambda: lambda: db)
+    asyncio.run(_run_story_arc_job(job.id))
+
+    assert db.get(StoryArcGenerationJob, job.id) is None
+    retried = ensure_story_arc_job(db, session_id)
+    assert retried is not None
+    assert retried.id != job.id
+    assert (retried.source_turn_start, retried.source_turn_end) == (1, 25)
+
+
+def test_only_one_story_arc_job_is_active_until_next_trigger() -> None:
+    db = _database()
+    session = GameSession(name="测试", era_id="second_generation", state_version=60)
+    db.add(session)
+    db.flush()
+    _add_turns(db, session.id, 1, 35)
+    db.commit()
+
+    first = ensure_story_arc_job(db, session.id)
+    assert first is not None
+    _add_turns(db, session.id, 36, 60)
+    db.commit()
+
+    assert ensure_story_arc_job(db, session.id) is None
+    assert db.query(StoryArcGenerationJob).count() == 1
+
+
+def test_next_trigger_processes_the_following_25_nodes_after_success() -> None:
+    db = _database()
+    session = GameSession(name="测试", era_id="second_generation", state_version=60)
+    db.add(session)
+    db.flush()
+    _add_turns(db, session.id, 1, 60)
+    db.commit()
+
+    first = ensure_story_arc_job(db, session.id)
+    assert first is not None
+    first.status = "ready"
+    first.completed_at = first.created_at
+    db.commit()
+
+    second = ensure_story_arc_job(db, session.id)
+    assert second is not None
+    assert (second.source_turn_start, second.source_turn_end) == (26, 50)
 
 
 def test_provider_without_concurrency_automatically_selects_queue_mode() -> None:

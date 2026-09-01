@@ -1156,7 +1156,11 @@ function StoryArcNotice({
       {job ? (
         <>
           <strong>{status.blocked ? "正在整理故事弧，剧情暂时排队" : "正在后台整理故事弧"}</strong>
-          <span>整理第 {job.source_turn_start}—{job.source_turn_end} 轮；{status.blocked ? "完成后会自动恢复所有剧情操作。" : "你仍可继续推进剧情。"}</span>
+          <span>
+            整理第 {job.source_turn_start}—{job.source_turn_end} 轮；
+            {status.blocked ? "完成后会自动恢复所有剧情操作。" : "你仍可继续推进剧情。"}
+            请不要退出或关闭软件，生成结束后此提示会自动消失。
+          </span>
         </>
       ) : status.latest_failed_job ? (
         <>

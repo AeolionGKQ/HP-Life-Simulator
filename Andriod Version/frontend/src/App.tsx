@@ -30,6 +30,7 @@ import {
   type LLMConfigStatus,
   type SaveExport,
   type SetupView,
+  type StoryArcJob,
 } from "./api";
 import { isAndroidNative, pickTextFile, saveTextFile } from "./pythonBridge";
 import { GameView } from "./GameView";
@@ -73,6 +74,7 @@ export function App() {
   const [setupAnswer, setSetupAnswer] = useState("");
   const [setupLoading, setSetupLoading] = useState<"answer" | "navigate" | "confirm" | null>(null);
   const [worldlineRate, setWorldlineRate] = useState(0);
+  const [storyArcActivity, setStoryArcActivity] = useState<StoryArcJob | null>(null);
   const [configOpen, setConfigOpen] = useState(false);
   const configTriggerRef = useRef<HTMLButtonElement>(null);
   const configDialogRef = useRef<HTMLElement>(null);
@@ -693,6 +695,12 @@ export function App() {
         </aside>
 
         <section className="content-card">
+          {storyArcActivity && (
+            <div className="story-arc-activity" role="status" aria-live="polite">
+              正在整理第 {storyArcActivity.source_turn_start}—{storyArcActivity.source_turn_end} 个剧情节点。
+              请不要退出或关闭软件，生成结束后此提示会自动消失。
+            </div>
+          )}
           <div className="content-heading">
             <div>
               <p className="eyebrow">魔法档案阅览台</p>
@@ -866,6 +874,7 @@ export function App() {
               eraId={currentEra.id}
               timelineLabel={timelineLabel}
               onWorldlineChange={setWorldlineRate}
+              onStoryArcActivityChange={setStoryArcActivity}
             />
           ) : (
             <div className="empty-panel">

@@ -331,7 +331,7 @@ def _source_turns_for_new_job(
     for ids in db.scalars(
         select(StoryArcGenerationJob.source_turn_ids).where(
             StoryArcGenerationJob.session_id == session_id,
-            StoryArcGenerationJob.status.in_(("pending", "generating", "ready", "failed")),
+            StoryArcGenerationJob.status.in_(("pending", "generating", "ready")),
         )
     ):
         used_ids.update(str(item) for item in (ids or []))
@@ -349,6 +349,20 @@ def _source_turns_for_new_job(
 
 
 def ensure_story_arc_job(db: Session, session_id: str) -> StoryArcGenerationJob | None:
+    active = db.scalar(
+        select(StoryArcGenerationJob)
+        .where(
+            StoryArcGenerationJob.session_id == session_id,
+            StoryArcGenerationJob.status.in_(("pending", "generating")),
+        )
+        .order_by(StoryArcGenerationJob.created_at.asc())
+        .limit(1)
+    )
+    if active is not None:
+        # 一个存档同一时间只追赶一批 25 个节点；当前任务完成后，
+        # 下一次新剧情节点再触发下一批，避免后台无界并发占满模型服务。
+        return None
+
     source_turns = _source_turns_for_new_job(db, session_id)
     settings = get_settings()
     if len(source_turns) < settings.game.story_arc_turns:
@@ -363,7 +377,20 @@ def ensure_story_arc_job(db: Session, session_id: str) -> StoryArcGenerationJob 
         )
     )
     if existing:
-        return existing if existing.status in {"pending", "generating"} else None
+        if existing.status in {"pending", "generating"}:
+            return existing
+        if existing.status == "failed":
+            # 兼容旧版本留下的失败记录：失败来源节点没有被成功归档，
+            # 下一次新剧情节点到来时应重新使用同一批节点。
+            existing.status = "pending"
+            existing.attempt = 0
+            existing.error = None
+            existing.started_at = None
+            existing.completed_at = None
+            db.commit()
+            db.refresh(existing)
+            return existing
+        return None
     session = db.get(GameSession, session_id)
     if session is None:
         return None
@@ -815,13 +842,13 @@ async def _run_story_arc_job(job_id: str) -> None:
         job.completed_at = utc_now()
         job.error = None
         db.commit()
-    except Exception as error:
+    except Exception:
         db.rollback()
         job = db.get(StoryArcGenerationJob, job_id)
         if job:
-            job.status = "failed"
-            job.error = str(error)[:2000]
-            job.completed_at = utc_now()
+            # 失败不代表这些节点已经被归档。删除任务记录后，来源节点
+            # 会重新回到累积区，并在下一次新剧情节点生成后再次尝试。
+            db.delete(job)
             db.commit()
     finally:
         db.close()

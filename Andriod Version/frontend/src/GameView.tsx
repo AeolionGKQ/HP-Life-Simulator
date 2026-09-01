@@ -10,6 +10,7 @@ import {
   type StoredTurn,
   type Relationship,
   type StoryArc,
+  type StoryArcJob,
   type StoryArcStatus,
   type TurnResult,
 } from "./api";
@@ -21,6 +22,8 @@ interface GameViewProps {
   eraId: string;
   timelineLabel: string;
   onWorldlineChange: (value: number) => void;
+  // 后台生成提示挂在功能栏与对话区之间，由外层渲染，这里只上报当前任务。
+  onStoryArcActivityChange: (job: StoryArcJob | null) => void;
 }
 
 const NPC_NAMES: Record<string, string> = {
@@ -53,6 +56,7 @@ export function GameView({
   eraId,
   timelineLabel,
   onWorldlineChange,
+  onStoryArcActivityChange,
 }: GameViewProps) {
   const [state, setState] = useState<Record<string, any> | null>(null);
   const [stateVersion, setStateVersion] = useState(0);
@@ -176,22 +180,25 @@ export function GameView({
   }, [sessionId]);
 
   useEffect(() => {
-    if (activeMenu !== "记忆管理") return;
     let active = true;
     let pollInFlight = false;
+    // 后台生成提示要在任何面板都能出现和消失，所以状态一直轮询；
+    // 故事弧列表只有记忆管理面板需要，避免其他面板做无用查询。
+    const inMemoryPanel = activeMenu === "记忆管理";
     async function pollStoryArcs() {
       if (pollInFlight) return;
       pollInFlight = true;
       try {
-        const [status, arcs] = await Promise.all([
-          api.storyArcStatus(sessionId),
-          api.storyArcs(sessionId),
-        ]);
+        const status = await api.storyArcStatus(sessionId);
         if (!active) return;
         setStoryArcStatus(status);
+        if (!inMemoryPanel) return;
+        const arcs = await api.storyArcs(sessionId);
+        if (!active) return;
         setStoryArcs(arcs);
       } catch (reason: unknown) {
-        if (active) {
+        // 只是后台提示的轮询失败时不打断当前面板，避免剧情页弹出无关报错。
+        if (active && inMemoryPanel) {
           setError(reason instanceof Error ? reason.message : "无法读取故事弧状态");
         }
       } finally {
@@ -199,12 +206,24 @@ export function GameView({
       }
     }
     void pollStoryArcs();
-    const timer = window.setInterval(() => void pollStoryArcs(), 2000);
+    const timer = window.setInterval(
+      () => void pollStoryArcs(),
+      inMemoryPanel ? 2000 : 5000,
+    );
     return () => {
       active = false;
       window.clearInterval(timer);
     };
   }, [sessionId, activeMenu]);
+
+  useEffect(() => {
+    onStoryArcActivityChange(storyArcStatus?.active_job ?? null);
+  }, [storyArcStatus, onStoryArcActivityChange]);
+
+  useEffect(
+    () => () => onStoryArcActivityChange(null),
+    [onStoryArcActivityChange],
+  );
 
   async function submitAction(
     kind: "choice" | "free_text",
