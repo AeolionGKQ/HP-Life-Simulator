@@ -248,6 +248,11 @@ BOND_RULES = """羁绊系统统一描述玩家与具体 NPC 的 affinity（好�
 才能返回 relationship_deltas；移动、普通学习、休息和没有 NPC 参与的行动默认不改变羁绊。
 relationship_deltas 必须使用 npc_id、affinity_delta、trust_delta、可选 stage、可选 romance_stage、
 可选 bond_type、reason 和 evidence。普通 stage 与 romance_stage 不得混用，不能返回未知阶段。
+如果玩家在 player_action 中明确表现出想与某个 NPC 或人物建立羁绊的倾向，
+或直接要求与某个 NPC 或人物建立羁绊，只要对象已经在当前场景、NPC 列表或剧情上下文中出现，
+就要优先尊重玩家意愿，将这段关系记录到羁绊列表：已有 NPC 使用 relationship_deltas，
+新出现且值得长期记录的人物使用 relationship_creations。这个优先级不等于关系必然成功，
+仍必须基于本轮真实互动提供合理的 reason 和 evidence，也不能凭空创建未出现的人物或跳过程序的年龄、阶段和重复校验。
 未满 12 岁的玩家只能发展普通羁绊，不能进入任何恋爱阶段；12—17 岁最多进入 dating；
 committed、adult_stage 和 marriage 需要玩家与 NPC 都已成年。NPC 年龄未知或双方一方未成年一方已成年时，
 不得提出恋爱阶段。不要因为高好感就自动让 NPC 同意恋爱，必须让 NPC 拥有独立意愿和合理剧情依据。
@@ -288,7 +293,10 @@ NARRATIVE_STYLE_RULES = """narrative 必须是本回合完整、连贯、可读�
 根据当前行动和场景需要展开关键动作、感官、对白、人物反应、因果过渡和结果；重要事件不能为了节省字数被过度压缩。
 叙事长度和节奏应随剧情变化：普通移动可以简洁，冲突、发现、对话和关键选择应给出足够的过程与反应。
 不要机械套用固定的开场、镜头顺序、句式或段落模板；可以根据本回合内容从动作、对白、感官、环境或人物反应切入。
-不要为了显得详细而添加与当前行动无关的填充内容，也不要把每回合写成相同格式的播报。"""
+不要为了显得详细而添加与当前行动无关的填充内容，也不要把每回合写成相同格式的播报。
+剧情旁白提及玩家角色时，必须优先使用 player_state.identity.name 中记录的角色名字，
+不要把玩家角色写成第二人称“你”。NPC 对玩家的直接对白可以根据自然对话使用“你”等称呼；
+只有旁白叙述玩家角色时适用本条规则。"""
 
 FATE_INTERVENTION_RULES = """如果本回合 player_action.kind 是 fate_intervention，当前请求属于【干涉命运】作弊模式。
 玩家提交的 fate_instruction 不是“角色尝试采取的行动”，而是玩家指定下一个剧情节点必须实际发生的核心事件。

@@ -1,7 +1,7 @@
 ﻿VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(3, 6, 2, 0),
-    prodvers=(3, 6, 2, 0),
+    filevers=(3, 6, 3, 0),
+    prodvers=(3, 6, 3, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -17,11 +17,11 @@
           [
             StringStruct('CompanyName', 'HP Simulator'),
             StringStruct('FileDescription', 'Hogwarts Life Simulator'),
-            StringStruct('FileVersion', '3.6.2'),
+            StringStruct('FileVersion', '3.6.3'),
             StringStruct('InternalName', 'HogwartsLifeSimulator'),
             StringStruct('OriginalFilename', 'HogwartsLifeSimulator.exe'),
             StringStruct('ProductName', 'Hogwarts Life Simulator'),
-            StringStruct('ProductVersion', '3.6.2'),
+            StringStruct('ProductVersion', '3.6.3'),
           ]
         )
       ]

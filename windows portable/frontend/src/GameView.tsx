@@ -1378,7 +1378,11 @@ const FIELD_LABELS: Record<string, string> = {
   severity: "程度",
   duration_minutes: "持续时间",
   school_year: "学年",
+  grade: "年级",
   year_level: "年级",
+  active_courses: "在读课程",
+  selected_courses: "选修课程",
+  skill_progression: "技能成长",
   house: "学院",
   status: "状态",
   stage: "关系阶段",
@@ -1610,6 +1614,7 @@ function translateField(key: string): string {
 function translateValue(value: unknown, fieldName?: string): string {
   if (typeof value === "boolean") return value ? "是" : "否";
   const text = String(value);
+  if (fieldName === "grade") return translateGrade(text);
   if (fieldName === "course_id" || fieldName === "id" || fieldName === "skill_id") {
     return COURSE_LABELS[text.toLowerCase()] ?? text;
   }

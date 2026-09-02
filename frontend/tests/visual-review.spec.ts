@@ -443,7 +443,13 @@ async function installApi(page: Page, scenario: Scenario) {
         owl_results: [],
         newt_results: [],
         course_selection: null,
-        course_history: [],
+        course_history: [{
+          school_year: "1991-1992",
+          grade: "year_1",
+          active_courses: ["charms", "transfiguration"],
+          selected_courses: [],
+          skill_progression: { charms: 1, transfiguration: 0 },
+        }],
       },
       "/api/sessions/session-active/journal": scenario === "story-initial"
         ? []
@@ -946,6 +952,17 @@ for (const viewport of viewports) {
       await expect(page.getByText("学期", { exact: true })).toBeVisible();
       await expect(page.getByText("秋季", { exact: true })).toBeVisible();
       await expect(page.getByText("autumn", { exact: true })).toHaveCount(0);
+      const historySection = page.locator(".data-section").filter({
+        has: page.getByRole("heading", { name: "年度记录" }),
+      });
+      await expect(historySection.getByText("年级", { exact: true })).toBeVisible();
+      await expect(historySection.getByText("一年级", { exact: true })).toBeVisible();
+      await expect(historySection.getByText("在读课程", { exact: true })).toBeVisible();
+      await expect(historySection.getByText("技能成长", { exact: true })).toBeVisible();
+      await expect(historySection.getByText("咒语", { exact: true })).toHaveCount(2);
+      await expect(historySection.getByText("Grade", { exact: true })).toHaveCount(0);
+      await expect(historySection.getByText("Skill Progression", { exact: true })).toHaveCount(0);
+      await expect(historySection.getByText("year_1", { exact: true })).toHaveCount(0);
 
       await page.getByRole("button", { name: "世界线" }).click();
       await expect(page.getByText("霍格沃茨来信与入学", { exact: true })).toBeVisible();
